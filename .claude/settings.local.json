@@ -5,7 +5,9 @@
       "Bash(npm audit *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(git rm *)",
+      "Bash(git push *)"
     ]
   }
 }
