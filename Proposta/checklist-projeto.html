@@ -1,0 +1,278 @@
+<div id="app">
+  <div style="max-width:760px;margin:0 auto;padding:1.5rem 0;">
+    <h1 style="margin-bottom:4px;">Personal Finance Dashboard</h1>
+    <p style="color:var(--color-text-secondary);margin-top:0;">Checklist de desenvolvimento do projeto</p>
+
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:1rem 1.25rem;margin:1.25rem 0 2rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:13px;color:var(--color-text-secondary);">Progresso geral</span>
+        <span id="progress-label" style="font-size:14px;font-weight:500;">0%</span>
+      </div>
+      <div style="height:8px;background:var(--color-background-tertiary);border-radius:99px;overflow:hidden;">
+        <div id="progress-bar" style="height:100%;width:0%;background:var(--color-text-info);transition:width .25s;"></div>
+      </div>
+    </div>
+
+    <div id="sections"></div>
+
+    <div style="display:flex;gap:8px;margin-top:1.5rem;">
+      <button id="reset-btn"><i class="ti ti-refresh" style="font-size:16px;vertical-align:-2px;margin-right:6px;" aria-hidden="true"></i>Reiniciar checklist</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const PHASES = [
+  {
+    id: 'setup',
+    title: 'Fase 0 — Setup do projeto',
+    icon: 'ti-settings',
+    items: [
+      'Criar repositório no GitHub',
+      'Inicializar projeto (HTML + CSS + JavaScript no frontend, Node.js + Express no backend)',
+      'Criar base de dados no Supabase (PostgreSQL)',
+      'Configurar driver de base de dados (pg) no Node.js',
+      'Configurar variáveis de ambiente (.env)',
+      'Configurar deploy no Vercel (frontend + API)'
+    ]
+  },
+  {
+    id: 'auth',
+    title: '1. Gestão de utilizador',
+    icon: 'ti-user',
+    items: [
+      'Criar conta (nome, email, password, moeda)',
+      'Login com sessão/JWT (Express + bcrypt)',
+      'Manter sessão iniciada',
+      'Perfil financeiro (salário, estratégia de repartição)'
+    ]
+  },
+  {
+    id: 'dashboard',
+    title: '2. Dashboard principal',
+    icon: 'ti-chart-bar',
+    items: [
+      'Cards de visão geral (património, investimentos, reserva, disponível)',
+      'Gráfico de distribuição do salário (pizza)',
+      'Barras de progresso mensal por categoria'
+    ]
+  },
+  {
+    id: 'income',
+    title: '3. Gestão de rendimentos',
+    icon: 'ti-cash',
+    items: [
+      'Formulário de adicionar rendimento (tipo, valor, data, descrição)',
+      'Listagem de rendimentos por mês'
+    ]
+  },
+  {
+    id: 'autosplit',
+    title: '4. Sistema automático de repartição',
+    icon: 'ti-percentage',
+    items: [
+      'Lógica de cálculo 50/25/15/10',
+      'Aplicar repartição automaticamente ao registar rendimento',
+      'Distinguir valor planeado vs. valor real movido'
+    ]
+  },
+  {
+    id: 'expenses',
+    title: '5. Gestão de despesas',
+    icon: 'ti-shopping-cart',
+    items: [
+      'Formulário de despesa (categoria, valor, data)',
+      'Categorias (Casa, Comida, Transporte, Saúde, Lazer, Tecnologia, Outros)',
+      'Resumo de gastos do mês por categoria'
+    ]
+  },
+  {
+    id: 'emergency',
+    title: '6. Reserva de emergência',
+    icon: 'ti-shield',
+    items: [
+      'Definir reserva alvo',
+      'Acompanhar valor atual e progresso (%)',
+      'Calcular meses de proteção com base nas despesas médias'
+    ]
+  },
+  {
+    id: 'investments',
+    title: '7. Investimentos',
+    icon: 'ti-trending-up',
+    items: [
+      'Adicionar ativo (tipo, nome, valor, data, rentabilidade)',
+      'Composição da carteira (% por ativo)'
+    ]
+  },
+  {
+    id: 'fixedincome',
+    title: '8. Renda fixa',
+    icon: 'ti-building-bank',
+    items: [
+      'Registar depósitos a prazo / aplicações',
+      'Calcular rendimento esperado'
+    ]
+  },
+  {
+    id: 'goals',
+    title: '9. Objetivos financeiros',
+    icon: 'ti-target-arrow',
+    items: [
+      'Criar meta (nome, valor objetivo, valor atual)',
+      'Mostrar progresso e valor em falta'
+    ]
+  },
+  {
+    id: 'calendar',
+    title: '10. Calendário financeiro',
+    icon: 'ti-calendar',
+    items: [
+      'Vista de calendário mensal',
+      'Suporte a despesas recorrentes'
+    ]
+  },
+  {
+    id: 'reports',
+    title: '11. Relatórios',
+    icon: 'ti-report',
+    items: [
+      'Relatório mensal (receitas, despesas, investido, poupado)',
+      'Relatório anual com gráficos de evolução',
+      'Exportação para PDF/Excel'
+    ]
+  },
+  {
+    id: 'alerts',
+    title: '12. Sistema de alertas',
+    icon: 'ti-bell',
+    items: [
+      'Alerta de orçamento de categoria ultrapassado',
+      'Alerta de reserva abaixo do objetivo',
+      'Notificação de meta atingida'
+    ]
+  },
+  {
+    id: 'settings',
+    title: '14. Configurações',
+    icon: 'ti-adjustments',
+    items: [
+      'Editar percentagens da estratégia de repartição',
+      'Histórico de alterações da estratégia'
+    ]
+  },
+  {
+    id: 'security',
+    title: 'Segurança',
+    icon: 'ti-lock',
+    items: [
+      'Autenticação de dois fatores (2FA)',
+      'Encriptação de dados sensíveis',
+      'Exportar/apagar dados do utilizador'
+    ]
+  },
+  {
+    id: 'v2',
+    title: 'Versão futura — IA financeira',
+    icon: 'ti-bulb',
+    items: [
+      'Análise de padrões de gastos',
+      'Sugestões personalizadas de poupança'
+    ]
+  }
+];
+
+const STORAGE_KEY = 'pfd-checklist-state';
+let state = {};
+
+function makeItemId(phaseId, idx) { return phaseId + '-' + idx; }
+
+function totalItems() {
+  return PHASES.reduce((sum, p) => sum + p.items.length, 0);
+}
+
+function checkedCount() {
+  return Object.values(state).filter(Boolean).length;
+}
+
+function updateProgress() {
+  const total = totalItems();
+  const done = checkedCount();
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = pct + '% (' + done + '/' + total + ')';
+}
+
+function render() {
+  const container = document.getElementById('sections');
+  container.innerHTML = '';
+  PHASES.forEach(phase => {
+    const doneInPhase = phase.items.filter((_, idx) => state[makeItemId(phase.id, idx)]).length;
+    const card = document.createElement('div');
+    card.style.cssText = 'background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:1rem 1.25rem;margin-bottom:12px;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;';
+    header.innerHTML = '<div style="display:flex;align-items:center;gap:8px;"><i class="ti ' + phase.icon + '" style="font-size:18px;" aria-hidden="true"></i><span style="font-weight:500;font-size:15px;">' + phase.title + '</span></div>' +
+      '<span style="font-size:12px;color:var(--color-text-secondary);">' + doneInPhase + '/' + phase.items.length + '</span>';
+    card.appendChild(header);
+
+    phase.items.forEach((item, idx) => {
+      const id = makeItemId(phase.id, idx);
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer;font-size:14px;';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = !!state[id];
+      checkbox.style.cssText = 'width:16px;height:16px;flex-shrink:0;';
+      checkbox.addEventListener('change', () => toggleItem(id, checkbox.checked));
+      const span = document.createElement('span');
+      span.textContent = item;
+      if (state[id]) {
+        span.style.textDecoration = 'line-through';
+        span.style.color = 'var(--color-text-tertiary)';
+      }
+      row.appendChild(checkbox);
+      row.appendChild(span);
+      card.appendChild(row);
+    });
+
+    container.appendChild(card);
+  });
+  updateProgress();
+}
+
+async function toggleItem(id, value) {
+  state[id] = value;
+  render();
+  try {
+    await window.storage.set(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.error('Erro ao guardar progresso', e);
+  }
+}
+
+async function loadState() {
+  try {
+    const result = await window.storage.get(STORAGE_KEY);
+    if (result && result.value) {
+      state = JSON.parse(result.value);
+    }
+  } catch (e) {
+    state = {};
+  }
+  render();
+}
+
+document.getElementById('reset-btn').addEventListener('click', async () => {
+  state = {};
+  render();
+  try {
+    await window.storage.set(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.error('Erro ao reiniciar', e);
+  }
+});
+
+loadState();
+</script>
