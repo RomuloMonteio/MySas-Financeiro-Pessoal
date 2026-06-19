@@ -10,7 +10,7 @@ app.use(express.json());
 
 // Serve ficheiros estáticos do frontend em desenvolvimento local
 if (process.env.NODE_ENV !== 'production') {
-  app.use(express.static(path.join(__dirname, '../public')));
+  app.use(express.static(path.join(__dirname, '..')));
 }
 
 // Rota de health check
@@ -26,7 +26,7 @@ app.get('/api/health', (req, res) => {
 // Fallback para o frontend em desenvolvimento local
 if (process.env.NODE_ENV !== 'production') {
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../public/index.html'));
+    res.sendFile(path.join(__dirname, '../index.html'));
   });
 }
 
