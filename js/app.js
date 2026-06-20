@@ -340,20 +340,164 @@ async function submitProfile() {
 }
 
 /* ══════════════════════════════════════
-   PÁGINA: DASHBOARD (placeholder)
+   PÁGINA: DASHBOARD
 ══════════════════════════════════════ */
-function renderDashboard() {
+async function renderDashboard() {
+  let profile = null;
+  try {
+    const res = await apiFetch('/profile');
+    profile = res.profile;
+  } catch (_) {}
+
+  const sym      = currencySymbol();
+  const salary   = Number(profile?.monthly_salary  || 0);
+  const needs    = Number(profile?.split_needs     ?? 50);
+  const savings  = Number(profile?.split_savings   ?? 25);
+  const emerg    = Number(profile?.split_emergency ?? 15);
+  const wants    = Number(profile?.split_wants     ?? 10);
+
+  const amtNeeds  = salary * needs   / 100;
+  const amtSav    = salary * savings / 100;
+  const amtEmerg  = salary * emerg   / 100;
+  const amtWants  = salary * wants   / 100;
+
+  const month = new Date().toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+
   render(appShell(`
-    <div class="page-title">Dashboard</div>
-    <div class="page-subtitle">Visão geral das tuas finanças</div>
-    <div class="coming-soon">
-      Dashboard em construção — próxima fase a chegar em breve.
-    </div>`));
+    <div class="page-header">
+      <div>
+        <div class="page-title">Dashboard</div>
+        <div class="page-subtitle">Orçamento de ${month}</div>
+      </div>
+      <div class="salary-badge">
+        <span class="salary-label">Salário mensal</span>
+        <span class="salary-value">${sym} ${fmt(salary)}</span>
+      </div>
+    </div>
+
+    <div class="overview-grid">
+      ${ovCard('Necessidades',          amtNeeds,  needs,   sym, 'var(--info)')}
+      ${ovCard('Poupança / Investimento', amtSav,  savings, sym, 'var(--success)')}
+      ${ovCard('Reserva de emergência', amtEmerg,  emerg,   sym, 'var(--warning)')}
+      ${ovCard('Lazer / Desejos',       amtWants,  wants,   sym, 'var(--primary)')}
+    </div>
+
+    <div class="dashboard-row">
+      <div class="card">
+        <div class="dash-section-title">Distribuição do salário</div>
+        <div class="pie-wrap">
+          <canvas id="pie-chart"></canvas>
+          <div class="pie-legend">
+            ${pieLegendItem('Necessidades', needs,   'var(--info)')}
+            ${pieLegendItem('Poupança',     savings, 'var(--success)')}
+            ${pieLegendItem('Emergência',   emerg,   'var(--warning)')}
+            ${pieLegendItem('Lazer',        wants,   'var(--primary)')}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="dash-section-title">Progresso mensal</div>
+        <div class="progress-list">
+          ${progressItem('Necessidades',           0, amtNeeds, sym, 'var(--info)')}
+          ${progressItem('Poupança / Investimento',0, amtSav,   sym, 'var(--success)')}
+          ${progressItem('Reserva de emergência',  0, amtEmerg, sym, 'var(--warning)')}
+          ${progressItem('Lazer / Desejos',        0, amtWants, sym, 'var(--primary)')}
+        </div>
+        <p class="progress-hint">As transações serão adicionadas na próxima fase.</p>
+      </div>
+    </div>
+  `));
+
+  drawDonutChart([needs, savings, emerg, wants]);
+}
+
+function ovCard(label, amount, pct, sym, color) {
+  return `
+    <div class="ov-card">
+      <div class="ov-accent" style="background:${color}"></div>
+      <div class="ov-body">
+        <div class="ov-label">${label}</div>
+        <div class="ov-amount">${sym} ${fmt(amount)}</div>
+        <div class="ov-pct">${pct}% do salário</div>
+      </div>
+    </div>`;
+}
+
+function pieLegendItem(label, pct, color) {
+  return `
+    <div class="pie-legend-item">
+      <span class="legend-dot" style="background:${color}"></span>
+      <span class="legend-label">${label}</span>
+      <span class="legend-pct">${pct}%</span>
+    </div>`;
+}
+
+function progressItem(label, spent, budget, sym, color) {
+  const pct = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
+  return `
+    <div class="prog-item">
+      <div class="prog-header">
+        <span class="prog-label">${label}</span>
+        <span class="prog-values">${sym} ${fmt(spent)} <span class="prog-sep">/</span> ${sym} ${fmt(budget)}</span>
+      </div>
+      <div class="prog-track">
+        <div class="prog-fill" style="width:${pct}%;background:${color}"></div>
+      </div>
+    </div>`;
+}
+
+function drawDonutChart(data) {
+  const canvas = document.getElementById('pie-chart');
+  if (!canvas) return;
+
+  const dpr  = window.devicePixelRatio || 1;
+  const size = 180;
+  canvas.width  = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width  = size + 'px';
+  canvas.style.height = size + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#7c6aff'];
+  const cx = size / 2, cy = size / 2;
+  const r  = size / 2 - 6;
+  const ri = r * 0.58;
+  const total = data.reduce((a, b) => a + b, 0);
+
+  let angle = -Math.PI / 2;
+  data.forEach((val, i) => {
+    const slice = (val / total) * 2 * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, angle, angle + slice);
+    ctx.closePath();
+    ctx.fillStyle = colors[i];
+    ctx.fill();
+    angle += slice;
+  });
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, ri, 0, 2 * Math.PI);
+  ctx.fillStyle = '#161820';
+  ctx.fill();
+
+  ctx.fillStyle = '#e2e4f0';
+  ctx.font = `700 ${Math.round(size * 0.085)}px Inter, system-ui, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('100%', cx, cy);
 }
 
 /* ══════════════════════════════════════
    HELPERS
 ══════════════════════════════════════ */
+function fmt(n) {
+  return Number(n).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function currencySymbol() {
   const map = { EUR: '€', USD: '$', GBP: '£', BRL: 'R$' };
   return map[currentUser?.currency] || '€';
