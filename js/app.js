@@ -1,20 +1,11 @@
+/* ── Supabase ── */
+const SUPABASE_URL  = 'https://dwruxmnnewxawikvdhly.supabase.co';
+
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3cnV4bW5uZXd4YXdpa3ZkaGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5MDIyNTIsImV4cCI6MjA5NzQ3ODI1Mn0.XjnHarJnANNOeNVIOajM6DNoh1DLzKzWmuHIOtcTWAA'; // substitui pelo anon public key
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
 /* ── Estado global ── */
 let currentUser = null;
-
-/* ── API helper ── */
-async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem('token');
-  const res = await fetch('/api' + path, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
-    ...options
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Erro na API');
-  return data;
-}
 
 /* ── Render helper ── */
 function render(html) {
@@ -22,8 +13,8 @@ function render(html) {
 }
 
 /* ── Logout ── */
-function logout() {
-  localStorage.removeItem('token');
+async function logout() {
+  await sb.auth.signOut();
   currentUser = null;
   navigate('login');
 }
@@ -31,19 +22,20 @@ function logout() {
 /* ── Router ── */
 function navigate(page) {
   switch (page) {
-    case 'login':         renderLogin(); break;
-    case 'register':      renderRegister(); break;
+    case 'login':         renderLogin();        break;
+    case 'register':      renderRegister();     break;
     case 'profile-setup': renderProfileSetup(); break;
-    case 'dashboard':     renderDashboard(); break;
+    case 'dashboard':     renderDashboard();    break;
     default:              renderLogin();
   }
 }
 
 /* ── App shell (topbar) ── */
 function appShell(content) {
-  const initials = currentUser
-    ? currentUser.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-    : '?';
+  const meta     = currentUser?.user_metadata || {};
+  const fullName = meta.name || currentUser?.email || '';
+  const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const first    = fullName.split(' ')[0];
   return `
     <div class="app-shell">
       <header class="topbar">
@@ -51,7 +43,7 @@ function appShell(content) {
         <div class="topbar-right">
           <div class="user-chip">
             <div class="avatar">${initials}</div>
-            ${currentUser ? currentUser.name.split(' ')[0] : ''}
+            ${first}
           </div>
           <button class="btn-logout" onclick="logout()">Sair</button>
         </div>
@@ -93,36 +85,33 @@ function renderLogin() {
 }
 
 async function submitLogin() {
-  const email = document.getElementById('email').value.trim();
+  const email    = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
-  const btn = document.getElementById('login-btn');
-  const alert = document.getElementById('alert');
-
-  alert.className = 'alert alert-error';
+  const btn      = document.getElementById('login-btn');
+  const alertEl  = document.getElementById('alert');
+  alertEl.className = 'alert alert-error';
 
   if (!email || !password) {
-    alert.textContent = 'Preenche o email e a password.';
-    alert.classList.add('show');
+    alertEl.textContent = 'Preenche o email e a password.';
+    alertEl.classList.add('show');
     return;
   }
 
   btn.disabled = true;
   btn.textContent = 'A entrar…';
 
-  try {
-    const { token, user } = await apiFetch('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password })
-    });
-    localStorage.setItem('token', token);
-    currentUser = user;
-    await checkProfileAndNavigate();
-  } catch (err) {
-    alert.textContent = err.message;
-    alert.classList.add('show');
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+
+  if (error) {
+    alertEl.textContent = traduzirErro(error.message);
+    alertEl.classList.add('show');
     btn.disabled = false;
     btn.textContent = 'Entrar';
+    return;
   }
+
+  currentUser = data.user;
+  await checkProfileAndNavigate();
 }
 
 /* ══════════════════════════════════════
@@ -147,7 +136,7 @@ function renderRegister() {
         </div>
         <div class="form-group">
           <label>Password</label>
-          <input id="password" type="password" placeholder="Mínimo 8 caracteres" autocomplete="new-password" />
+          <input id="password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" />
         </div>
         <div class="form-group">
           <label>Moeda</label>
@@ -167,50 +156,59 @@ function renderRegister() {
 }
 
 async function submitRegister() {
-  const name = document.getElementById('name').value.trim();
-  const email = document.getElementById('email').value.trim();
+  const name     = document.getElementById('name').value.trim();
+  const email    = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
   const currency = document.getElementById('currency').value;
-  const btn = document.getElementById('reg-btn');
-  const alert = document.getElementById('alert');
-
-  alert.className = 'alert alert-error';
+  const btn      = document.getElementById('reg-btn');
+  const alertEl  = document.getElementById('alert');
+  alertEl.className = 'alert alert-error';
 
   if (!name || !email || !password) {
-    alert.textContent = 'Preenche todos os campos.';
-    alert.classList.add('show');
+    alertEl.textContent = 'Preenche todos os campos.';
+    alertEl.classList.add('show');
+    return;
+  }
+  if (password.length < 6) {
+    alertEl.textContent = 'A password deve ter no mínimo 6 caracteres.';
+    alertEl.classList.add('show');
     return;
   }
 
   btn.disabled = true;
   btn.textContent = 'A criar conta…';
 
-  try {
-    const { token, user } = await apiFetch('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ name, email, password, currency })
-    });
-    localStorage.setItem('token', token);
-    currentUser = user;
-    navigate('profile-setup');
-  } catch (err) {
-    alert.textContent = err.message;
-    alert.classList.add('show');
+  const { data, error } = await sb.auth.signUp({
+    email,
+    password,
+    options: { data: { name, currency } }
+  });
+
+  if (error) {
+    alertEl.textContent = traduzirErro(error.message);
+    alertEl.classList.add('show');
     btn.disabled = false;
     btn.textContent = 'Criar conta';
+    return;
   }
+
+  currentUser = data.user;
+  navigate('profile-setup');
 }
 
 /* ══════════════════════════════════════
    PÁGINA: PERFIL FINANCEIRO
 ══════════════════════════════════════ */
-function renderProfileSetup(profile = null) {
-  const salary = profile?.monthly_salary || '';
-  const needs = profile?.split_needs ?? 50;
-  const savings = profile?.split_savings ?? 25;
+async function renderProfileSetup() {
+  const { data: profile } = await sb.from('financial_profiles')
+    .select('*').eq('user_id', currentUser.id).maybeSingle();
+
+  const salary    = profile?.monthly_salary || '';
+  const needs     = profile?.split_needs     ?? 50;
+  const savings   = profile?.split_savings   ?? 25;
   const emergency = profile?.split_emergency ?? 15;
-  const wants = profile?.split_wants ?? 10;
-  const sym = currencySymbol();
+  const wants     = profile?.split_wants     ?? 10;
+  const sym       = currencySymbol();
 
   render(appShell(`
     <div class="center-page" style="min-height:unset;padding:0;">
@@ -273,81 +271,77 @@ function renderProfileSetup(profile = null) {
 }
 
 function updateSplitPreview() {
-  const n = Number(document.getElementById('needs').value) || 0;
-  const s = Number(document.getElementById('savings').value) || 0;
+  const n = Number(document.getElementById('needs').value)     || 0;
+  const s = Number(document.getElementById('savings').value)   || 0;
   const e = Number(document.getElementById('emergency').value) || 0;
-  const w = Number(document.getElementById('wants').value) || 0;
+  const w = Number(document.getElementById('wants').value)     || 0;
   const total = n + s + e + w;
 
-  document.getElementById('lbl-needs').textContent = n + '%';
-  document.getElementById('lbl-savings').textContent = s + '%';
+  document.getElementById('lbl-needs').textContent     = n + '%';
+  document.getElementById('lbl-savings').textContent   = s + '%';
   document.getElementById('lbl-emergency').textContent = e + '%';
-  document.getElementById('lbl-wants').textContent = w + '%';
-  document.getElementById('bar-needs').style.width = Math.min(n, 100) + '%';
-  document.getElementById('bar-savings').style.width = Math.min(s, 100) + '%';
+  document.getElementById('lbl-wants').textContent     = w + '%';
+  document.getElementById('bar-needs').style.width     = Math.min(n, 100) + '%';
+  document.getElementById('bar-savings').style.width   = Math.min(s, 100) + '%';
   document.getElementById('bar-emergency').style.width = Math.min(e, 100) + '%';
-  document.getElementById('bar-wants').style.width = Math.min(w, 100) + '%';
+  document.getElementById('bar-wants').style.width     = Math.min(w, 100) + '%';
 
-  const totalEl = document.getElementById('split-total');
+  const totalEl       = document.getElementById('split-total');
   totalEl.textContent = `Total: ${total}%`;
-  totalEl.className = 'split-total ' + (total === 100 ? 'ok' : 'error');
+  totalEl.className   = 'split-total ' + (total === 100 ? 'ok' : 'error');
 }
 
 async function submitProfile() {
-  const salary = parseFloat(document.getElementById('salary').value);
-  const needs = Number(document.getElementById('needs').value);
-  const savings = Number(document.getElementById('savings').value);
+  const salary    = parseFloat(document.getElementById('salary').value);
+  const needs     = Number(document.getElementById('needs').value);
+  const savings   = Number(document.getElementById('savings').value);
   const emergency = Number(document.getElementById('emergency').value);
-  const wants = Number(document.getElementById('wants').value);
-  const btn = document.getElementById('profile-btn');
-  const alert = document.getElementById('alert');
-
-  alert.className = 'alert alert-error';
+  const wants     = Number(document.getElementById('wants').value);
+  const btn       = document.getElementById('profile-btn');
+  const alertEl   = document.getElementById('alert');
+  alertEl.className = 'alert alert-error';
 
   if (!salary || salary <= 0) {
-    alert.textContent = 'Introduz um salário válido.';
-    alert.classList.add('show');
+    alertEl.textContent = 'Introduz um salário válido.';
+    alertEl.classList.add('show');
     return;
   }
-
   if (needs + savings + emergency + wants !== 100) {
-    alert.textContent = 'As percentagens devem somar exactamente 100%.';
-    alert.classList.add('show');
+    alertEl.textContent = 'As percentagens devem somar exactamente 100%.';
+    alertEl.classList.add('show');
     return;
   }
 
   btn.disabled = true;
   btn.textContent = 'A guardar…';
 
-  try {
-    await apiFetch('/profile', {
-      method: 'PUT',
-      body: JSON.stringify({
-        monthly_salary: salary,
-        split_needs: needs,
-        split_savings: savings,
-        split_emergency: emergency,
-        split_wants: wants
-      })
-    });
-    navigate('dashboard');
-  } catch (err) {
-    alert.textContent = err.message;
-    alert.classList.add('show');
+  const { error } = await sb.from('financial_profiles').upsert({
+    user_id:         currentUser.id,
+    monthly_salary:  salary,
+    split_needs:     needs,
+    split_savings:   savings,
+    split_emergency: emergency,
+    split_wants:     wants,
+    updated_at:      new Date().toISOString()
+  }, { onConflict: 'user_id' });
+
+  if (error) {
+    alertEl.textContent = 'Erro ao guardar: ' + error.message;
+    alertEl.classList.add('show');
     btn.disabled = false;
     btn.textContent = 'Guardar e continuar';
+    return;
   }
+
+  navigate('dashboard');
 }
 
 /* ══════════════════════════════════════
    PÁGINA: DASHBOARD
 ══════════════════════════════════════ */
 async function renderDashboard() {
-  let profile = null;
-  try {
-    const res = await apiFetch('/profile');
-    profile = res.profile;
-  } catch (_) {}
+  const { data: profile } = await sb.from('financial_profiles')
+    .select('*').eq('user_id', currentUser.id).maybeSingle();
 
   const sym      = currencySymbol();
   const salary   = Number(profile?.monthly_salary  || 0);
@@ -376,10 +370,10 @@ async function renderDashboard() {
     </div>
 
     <div class="overview-grid">
-      ${ovCard('Necessidades',          amtNeeds,  needs,   sym, 'var(--info)')}
-      ${ovCard('Poupança / Investimento', amtSav,  savings, sym, 'var(--success)')}
-      ${ovCard('Reserva de emergência', amtEmerg,  emerg,   sym, 'var(--warning)')}
-      ${ovCard('Lazer / Desejos',       amtWants,  wants,   sym, 'var(--primary)')}
+      ${ovCard('Necessidades',            amtNeeds, needs,   sym, 'var(--info)')}
+      ${ovCard('Poupança / Investimento', amtSav,   savings, sym, 'var(--success)')}
+      ${ovCard('Reserva de emergência',   amtEmerg, emerg,   sym, 'var(--warning)')}
+      ${ovCard('Lazer / Desejos',         amtWants, wants,   sym, 'var(--primary)')}
     </div>
 
     <div class="dashboard-row">
@@ -399,10 +393,10 @@ async function renderDashboard() {
       <div class="card">
         <div class="dash-section-title">Progresso mensal</div>
         <div class="progress-list">
-          ${progressItem('Necessidades',           0, amtNeeds, sym, 'var(--info)')}
-          ${progressItem('Poupança / Investimento',0, amtSav,   sym, 'var(--success)')}
-          ${progressItem('Reserva de emergência',  0, amtEmerg, sym, 'var(--warning)')}
-          ${progressItem('Lazer / Desejos',        0, amtWants, sym, 'var(--primary)')}
+          ${progressItem('Necessidades',            0, amtNeeds, sym, 'var(--info)')}
+          ${progressItem('Poupança / Investimento', 0, amtSav,   sym, 'var(--success)')}
+          ${progressItem('Reserva de emergência',   0, amtEmerg, sym, 'var(--warning)')}
+          ${progressItem('Lazer / Desejos',         0, amtWants, sym, 'var(--primary)')}
         </div>
         <p class="progress-hint">As transações serão adicionadas na próxima fase.</p>
       </div>
@@ -412,6 +406,9 @@ async function renderDashboard() {
   drawDonutChart([needs, savings, emerg, wants]);
 }
 
+/* ══════════════════════════════════════
+   HELPERS — cards e gráficos
+══════════════════════════════════════ */
 function ovCard(label, amount, pct, sym, color) {
   return `
     <div class="ov-card">
@@ -450,23 +447,19 @@ function progressItem(label, spent, budget, sym, color) {
 function drawDonutChart(data) {
   const canvas = document.getElementById('pie-chart');
   if (!canvas) return;
-
   const dpr  = window.devicePixelRatio || 1;
   const size = 180;
   canvas.width  = size * dpr;
   canvas.height = size * dpr;
   canvas.style.width  = size + 'px';
   canvas.style.height = size + 'px';
-
-  const ctx = canvas.getContext('2d');
+  const ctx    = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
-
   const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#7c6aff'];
   const cx = size / 2, cy = size / 2;
   const r  = size / 2 - 6;
   const ri = r * 0.58;
   const total = data.reduce((a, b) => a + b, 0);
-
   let angle = -Math.PI / 2;
   data.forEach((val, i) => {
     const slice = (val / total) * 2 * Math.PI;
@@ -478,12 +471,10 @@ function drawDonutChart(data) {
     ctx.fill();
     angle += slice;
   });
-
   ctx.beginPath();
   ctx.arc(cx, cy, ri, 0, 2 * Math.PI);
   ctx.fillStyle = '#161820';
   ctx.fill();
-
   ctx.fillStyle = '#e2e4f0';
   ctx.font = `700 ${Math.round(size * 0.085)}px Inter, system-ui, sans-serif`;
   ctx.textAlign = 'center';
@@ -492,7 +483,7 @@ function drawDonutChart(data) {
 }
 
 /* ══════════════════════════════════════
-   HELPERS
+   HELPERS — utilitários
 ══════════════════════════════════════ */
 function fmt(n) {
   return Number(n).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -500,19 +491,24 @@ function fmt(n) {
 
 function currencySymbol() {
   const map = { EUR: '€', USD: '$', GBP: '£', BRL: 'R$' };
-  return map[currentUser?.currency] || '€';
+  return map[currentUser?.user_metadata?.currency] || '€';
+}
+
+function traduzirErro(msg) {
+  if (msg.includes('Invalid login credentials')) return 'Email ou password incorretos.';
+  if (msg.includes('Email not confirmed'))       return 'Confirma o teu email antes de entrar.';
+  if (msg.includes('User already registered'))   return 'Este email já está registado.';
+  if (msg.includes('Password should be'))        return 'A password deve ter no mínimo 6 caracteres.';
+  return 'Erro: ' + msg;
 }
 
 async function checkProfileAndNavigate() {
-  try {
-    const { profile } = await apiFetch('/profile');
-    if (!profile || !profile.monthly_salary || Number(profile.monthly_salary) <= 0) {
-      navigate('profile-setup');
-    } else {
-      navigate('dashboard');
-    }
-  } catch {
+  const { data } = await sb.from('financial_profiles')
+    .select('monthly_salary').eq('user_id', currentUser.id).maybeSingle();
+  if (!data || !data.monthly_salary || Number(data.monthly_salary) <= 0) {
     navigate('profile-setup');
+  } else {
+    navigate('dashboard');
   }
 }
 
@@ -520,17 +516,10 @@ async function checkProfileAndNavigate() {
    INIT
 ══════════════════════════════════════ */
 async function init() {
-  const token = localStorage.getItem('token');
-  if (!token) return navigate('login');
-
-  try {
-    const { user } = await apiFetch('/auth/me');
-    currentUser = user;
-    await checkProfileAndNavigate();
-  } catch {
-    localStorage.removeItem('token');
-    navigate('login');
-  }
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return navigate('login');
+  currentUser = session.user;
+  await checkProfileAndNavigate();
 }
 
 init();
