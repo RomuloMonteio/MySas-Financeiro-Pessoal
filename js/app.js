@@ -5,8 +5,9 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 /* ── Estado global ── */
-let currentUser = null;
-let viewMonth   = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+let currentUser  = null;
+let viewMonth    = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+let incomeProfile = null; // cache do perfil para preview de repartição
 
 /* ── Render helper ── */
 function render(html) {
@@ -528,8 +529,18 @@ async function checkProfileAndNavigate() {
    PÁGINA: RENDIMENTOS
 ══════════════════════════════════════ */
 async function renderIncome() {
-  const sym  = currencySymbol();
-  const rows = await loadIncomeRows();
+  const sym = currencySymbol();
+  const [rows, profileRes] = await Promise.all([
+    loadIncomeRows(),
+    sb.from('financial_profiles').select('*').eq('user_id', currentUser.id).maybeSingle()
+  ]);
+  incomeProfile = profileRes.data;
+
+  const needs   = Number(incomeProfile?.split_needs     ?? 50);
+  const savings = Number(incomeProfile?.split_savings   ?? 25);
+  const emerg   = Number(incomeProfile?.split_emergency ?? 15);
+  const wants   = Number(incomeProfile?.split_wants     ?? 10);
+
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
   const [year, mon] = viewMonth.split('-').map(Number);
   const label = new Date(year, mon - 1, 1).toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
@@ -568,7 +579,7 @@ async function renderIncome() {
           <label>Valor</label>
           <div class="input-prefix">
             <span>${sym}</span>
-            <input id="inc-amount" type="number" min="0.01" step="0.01" placeholder="0.00" />
+            <input id="inc-amount" type="number" min="0.01" step="0.01" placeholder="0.00" oninput="updateIncomePreview()" />
           </div>
         </div>
         <div class="form-group">
@@ -580,8 +591,44 @@ async function renderIncome() {
           <input id="inc-desc" type="text" placeholder="Opcional" />
         </div>
       </div>
+
+      <div class="split-preview-mini" id="inc-split-preview">
+        <div class="spm-item" style="border-color:var(--info)">
+          <span class="spm-label">Necessidades</span>
+          <span class="spm-pct">${needs}%</span>
+          <span class="spm-value" id="spm-needs">${sym} 0,00</span>
+        </div>
+        <div class="spm-item" style="border-color:var(--success)">
+          <span class="spm-label">Poupança</span>
+          <span class="spm-pct">${savings}%</span>
+          <span class="spm-value" id="spm-savings">${sym} 0,00</span>
+        </div>
+        <div class="spm-item" style="border-color:var(--warning)">
+          <span class="spm-label">Emergência</span>
+          <span class="spm-pct">${emerg}%</span>
+          <span class="spm-value" id="spm-emerg">${sym} 0,00</span>
+        </div>
+        <div class="spm-item" style="border-color:var(--primary)">
+          <span class="spm-label">Lazer</span>
+          <span class="spm-pct">${wants}%</span>
+          <span class="spm-value" id="spm-wants">${sym} 0,00</span>
+        </div>
+      </div>
+
       <button class="btn btn-primary income-submit-btn" id="inc-btn" onclick="submitIncome()">Adicionar</button>
     </div>
+
+    ${total > 0 ? `
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Repartição de ${label}</div>
+      <div class="split-summary-grid">
+        ${splitSummaryItem('Necessidades', total * needs   / 100, needs,   sym, 'var(--info)')}
+        ${splitSummaryItem('Poupança',     total * savings / 100, savings, sym, 'var(--success)')}
+        ${splitSummaryItem('Emergência',   total * emerg   / 100, emerg,   sym, 'var(--warning)')}
+        ${splitSummaryItem('Lazer',        total * wants   / 100, wants,   sym, 'var(--primary)')}
+      </div>
+      <p class="split-summary-note">Planeado com base nos ${sym} ${fmt(total)} de rendimentos deste mês.</p>
+    </div>` : ''}
 
     <div class="card" style="margin-top:1rem;">
       <div class="dash-section-title">Rendimentos de ${label}</div>
@@ -591,6 +638,34 @@ async function renderIncome() {
       }
     </div>
   `, 'income'));
+}
+
+function updateIncomePreview() {
+  if (!incomeProfile) return;
+  const amount  = parseFloat(document.getElementById('inc-amount')?.value) || 0;
+  const sym     = currencySymbol();
+  const needs   = Number(incomeProfile.split_needs     ?? 50);
+  const savings = Number(incomeProfile.split_savings   ?? 25);
+  const emerg   = Number(incomeProfile.split_emergency ?? 15);
+  const wants   = Number(incomeProfile.split_wants     ?? 10);
+
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = `${sym} ${fmt(val)}`; };
+  set('spm-needs',   amount * needs   / 100);
+  set('spm-savings', amount * savings / 100);
+  set('spm-emerg',   amount * emerg   / 100);
+  set('spm-wants',   amount * wants   / 100);
+}
+
+function splitSummaryItem(label, amount, pct, sym, color) {
+  return `
+    <div class="split-sum-item">
+      <div class="split-sum-dot" style="background:${color}"></div>
+      <div class="split-sum-body">
+        <div class="split-sum-label">${label}</div>
+        <div class="split-sum-amount">${sym} ${fmt(amount)}</div>
+        <div class="split-sum-pct">${pct}%</div>
+      </div>
+    </div>`;
 }
 
 async function loadIncomeRows() {
