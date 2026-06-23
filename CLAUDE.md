@@ -79,6 +79,16 @@ created_at  TIMESTAMPTZ DEFAULT NOW()
 RLS activa — SELECT/INSERT/DELETE por `auth.uid() = user_id`.
 Categorias definidas em `EXPENSE_CATS` (js/app.js) com campo `split: 'needs' | 'wants'`.
 
+### `emergency_fund`
+```sql
+user_id        UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE
+target_amount  DECIMAL(12,2) NOT NULL DEFAULT 0
+current_amount DECIMAL(12,2) NOT NULL DEFAULT 0
+updated_at     TIMESTAMPTZ DEFAULT NOW()
+```
+RLS activa — SELECT/INSERT/UPDATE por `auth.uid() = user_id`.
+Meses de proteção calculados em runtime: `current_amount / (despesas últimos 3 meses / 3)`.
+
 ### `financial_profiles`
 ```sql
 user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE
@@ -138,10 +148,13 @@ RLS activa — utilizador só vê/edita o seu próprio registo.
 - Resumo de gastos do mês por categoria (barras de progresso)
 - Dashboard atualizado com gastos reais vs orçamento
 
-### 🔄 Fase 6 — Reserva de emergência ← PRÓXIMA
-- Definir reserva alvo
-- Acompanhar valor actual e progresso (%)
-- Calcular meses de protecção com base nas despesas médias
+### ✅ Fase 6 — Reserva de emergência
+- Definir reserva alvo com recomendação baseada nas despesas reais (3–6 meses)
+- Acompanhar valor actual e progresso (%) com barra de progresso colorida
+- Calcular meses de proteção com base na média de despesas dos últimos 3 meses
+- Registar depósitos e levantamentos
+
+### 🔄 Fase 7 — Investimentos ← PRÓXIMA
 
 ### ⬜ Fase 7 — Investimentos
 - Adicionar activo (tipo, nome, valor, data, rentabilidade)

@@ -41,6 +41,7 @@ function navigate(page) {
     case 'dashboard':     renderDashboard();    break;
     case 'income':        renderIncome();       break;
     case 'expenses':      renderExpenses();     break;
+    case 'emergency':     renderEmergencyFund(); break;
     default:              renderLogin();
   }
 }
@@ -56,6 +57,7 @@ function appShell(content, activePage = '') {
     { page: 'dashboard', label: 'Dashboard' },
     { page: 'income',    label: 'Rendimentos' },
     { page: 'expenses',  label: 'Despesas' },
+    { page: 'emergency', label: 'Emergência' },
   ];
   const navHtml = navItems.map(n =>
     `<button class="nav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">${n.label}</button>`
@@ -76,6 +78,11 @@ function appShell(content, activePage = '') {
       page: 'expenses',
       label: 'Despesas',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>`
+    },
+    {
+      page: 'emergency',
+      label: 'Emergência',
+      icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`
     }
   ];
   const bnavHtml = bnavItems.map(n =>
@@ -986,6 +993,185 @@ function changeMonthExpenses(delta) {
   const d = new Date(year, mon - 1 + delta, 1);
   viewMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   renderExpenses();
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: RESERVA DE EMERGÊNCIA
+══════════════════════════════════════ */
+async function renderEmergencyFund() {
+  const sym = currencySymbol();
+
+  // Últimos 3 meses de despesas para calcular média
+  const now      = new Date();
+  const start3m  = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const start3mStr = `${start3m.getFullYear()}-${String(start3m.getMonth() + 1).padStart(2, '0')}-01`;
+
+  const [fundRes, expRes] = await Promise.all([
+    sb.from('emergency_fund').select('*').eq('user_id', currentUser.id).maybeSingle(),
+    sb.from('expenses').select('amount').eq('user_id', currentUser.id).gte('date', start3mStr)
+  ]);
+
+  const fund    = fundRes.data;
+  const current = Number(fund?.current_amount || 0);
+  const target  = Number(fund?.target_amount  || 0);
+  const pct     = target > 0 ? Math.min(100, Math.round(current / target * 100)) : 0;
+
+  const totalExp3m = (expRes.data || []).reduce((s, e) => s + Number(e.amount), 0);
+  const avgMonthly = totalExp3m / 3;
+  const monthsProt = avgMonthly > 0 ? (current / avgMonthly).toFixed(1) : null;
+
+  const barColor    = pct >= 100 ? 'var(--success)' : pct >= 50 ? 'var(--warning)' : 'var(--info)';
+  const missing     = Math.max(0, target - current);
+  const recMin      = avgMonthly > 0 ? fmt(avgMonthly * 3) : null;
+  const recMax      = avgMonthly > 0 ? fmt(avgMonthly * 6) : null;
+
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Reserva de emergência</div>
+        <div class="page-subtitle">Fundo para imprevistos</div>
+      </div>
+    </div>
+
+    <div class="card emerg-status-card">
+      <div class="emerg-current-label">Reserva actual</div>
+      <div class="emerg-current-amount">${sym} ${fmt(current)}</div>
+      <div class="emerg-progress">
+        <div class="emerg-progress-header">
+          <span class="emerg-pct" style="color:${barColor}">${pct}%</span>
+          <span>Objectivo: ${sym} ${fmt(target)}</span>
+        </div>
+        <div class="bar-track" style="height:12px">
+          <div class="bar-fill" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+      </div>
+      <div class="emerg-stats">
+        <div class="emerg-stat">
+          <div class="emerg-stat-value">${monthsProt !== null ? monthsProt : '—'}</div>
+          <div class="emerg-stat-label">Meses de proteção</div>
+        </div>
+        <div class="emerg-stat">
+          <div class="emerg-stat-value" style="color:${pct >= 100 ? 'var(--success)' : 'var(--danger)'}">
+            ${pct >= 100 ? '🎉' : `${sym} ${fmt(missing)}`}
+          </div>
+          <div class="emerg-stat-label">${pct >= 100 ? 'Objectivo atingido' : 'Em falta'}</div>
+        </div>
+        <div class="emerg-stat">
+          <div class="emerg-stat-value">${avgMonthly > 0 ? `${sym} ${fmt(avgMonthly)}` : '—'}</div>
+          <div class="emerg-stat-label">Despesa média/mês</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Registar movimento</div>
+      <div id="emerg-alert" class="alert alert-error"></div>
+      <div class="income-form-grid">
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="emerg-type">
+            <option value="deposit">💰 Depósito</option>
+            <option value="withdraw">💸 Levantamento</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Valor</label>
+          <div class="input-prefix">
+            <span>${sym}</span>
+            <input id="emerg-amount" type="number" min="0.01" step="0.01" placeholder="0.00" />
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="emerg-mov-btn" onclick="submitEmergencyMovement(${current})">Confirmar</button>
+    </div>
+
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Definir objectivo</div>
+      <div id="emerg-target-alert" class="alert alert-error"></div>
+      <div class="form-group">
+        <label>Valor objectivo</label>
+        <div class="input-prefix">
+          <span>${sym}</span>
+          <input id="emerg-target" type="number" min="0.01" step="0.01" placeholder="0.00" value="${target > 0 ? target : ''}" />
+        </div>
+      </div>
+      ${recMin ? `<p class="emerg-rec">Recomendação: 3–6 meses de despesas &mdash; ${sym} ${recMin} a ${sym} ${recMax}</p>` : '<p class="emerg-rec">Recomendação: tipicamente 3 a 6 meses de despesas mensais.</p>'}
+      <button class="btn btn-primary" id="emerg-target-btn" onclick="submitEmergencyTarget(${current})">Actualizar objectivo</button>
+    </div>
+  `, 'emergency'));
+}
+
+async function submitEmergencyMovement(currentAmount) {
+  const type    = document.getElementById('emerg-type').value;
+  const amount  = parseFloat(document.getElementById('emerg-amount').value);
+  const btn     = document.getElementById('emerg-mov-btn');
+  const alertEl = document.getElementById('emerg-alert');
+  alertEl.className = 'alert alert-error';
+
+  if (!amount || amount <= 0) {
+    alertEl.textContent = 'Introduz um valor válido.';
+    alertEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'A guardar…';
+
+  const newCurrent = type === 'deposit'
+    ? currentAmount + amount
+    : Math.max(0, currentAmount - amount);
+
+  const { data: fund } = await sb.from('emergency_fund').select('target_amount').eq('user_id', currentUser.id).maybeSingle();
+
+  const { error } = await sb.from('emergency_fund').upsert({
+    user_id:        currentUser.id,
+    current_amount: newCurrent,
+    target_amount:  Number(fund?.target_amount || 0),
+    updated_at:     new Date().toISOString()
+  }, { onConflict: 'user_id' });
+
+  if (error) {
+    alertEl.textContent = 'Erro: ' + error.message;
+    alertEl.classList.add('show');
+    btn.disabled    = false;
+    btn.textContent = 'Confirmar';
+    return;
+  }
+
+  await renderEmergencyFund();
+}
+
+async function submitEmergencyTarget(currentAmount) {
+  const target  = parseFloat(document.getElementById('emerg-target').value);
+  const btn     = document.getElementById('emerg-target-btn');
+  const alertEl = document.getElementById('emerg-target-alert');
+  alertEl.className = 'alert alert-error';
+
+  if (!target || target <= 0) {
+    alertEl.textContent = 'Introduz um objectivo válido.';
+    alertEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = 'A guardar…';
+
+  const { error } = await sb.from('emergency_fund').upsert({
+    user_id:        currentUser.id,
+    current_amount: currentAmount,
+    target_amount:  target,
+    updated_at:     new Date().toISOString()
+  }, { onConflict: 'user_id' });
+
+  if (error) {
+    alertEl.textContent = 'Erro: ' + error.message;
+    alertEl.classList.add('show');
+    btn.disabled    = false;
+    btn.textContent = 'Actualizar objectivo';
+    return;
+  }
+
+  await renderEmergencyFund();
 }
 
 /* ══════════════════════════════════════

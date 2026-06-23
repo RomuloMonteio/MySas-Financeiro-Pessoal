@@ -653,3 +653,64 @@ body {
 .split-sum-pct    { font-size: 0.75rem; color: var(--text3); }
 
 .split-summary-note { font-size: 0.8rem; color: var(--text3); margin-top: 0.5rem; }
+
+/* ── Reserva de emergência ── */
+.emerg-status-card { text-align: center; }
+
+.emerg-current-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+}
+
+.emerg-current-amount {
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 1.5rem;
+  line-height: 1.1;
+}
+
+@media (min-width: 480px) {
+  .emerg-current-amount { font-size: 2.75rem; }
+}
+
+.emerg-progress { margin-bottom: 1.5rem; }
+
+.emerg-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8125rem;
+  color: var(--text2);
+  margin-bottom: 0.5rem;
+}
+
+.emerg-pct { font-size: 1rem; font-weight: 700; }
+
+.emerg-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.emerg-stat       { text-align: center; }
+.emerg-stat-value { font-size: 1rem; font-weight: 700; margin-bottom: 4px; line-height: 1.2; }
+.emerg-stat-label { font-size: 0.65rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+
+@media (min-width: 480px) {
+  .emerg-stat-value { font-size: 1.125rem; }
+  .emerg-stat-label { font-size: 0.7rem; }
+}
+
+.emerg-rec {
+  font-size: 0.8rem;
+  color: var(--text2);
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
