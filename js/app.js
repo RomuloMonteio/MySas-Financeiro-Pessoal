@@ -6,6 +6,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 /* ── Estado global ── */
 let currentUser = null;
+let viewMonth   = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
 
 /* ── Render helper ── */
 function render(html) {
@@ -26,20 +27,31 @@ function navigate(page) {
     case 'register':      renderRegister();     break;
     case 'profile-setup': renderProfileSetup(); break;
     case 'dashboard':     renderDashboard();    break;
+    case 'income':        renderIncome();       break;
     default:              renderLogin();
   }
 }
 
-/* ── App shell (topbar) ── */
-function appShell(content) {
+/* ── App shell (topbar + nav) ── */
+function appShell(content, activePage = '') {
   const meta     = currentUser?.user_metadata || {};
   const fullName = meta.name || currentUser?.email || '';
   const initials = fullName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   const first    = fullName.split(' ')[0];
+
+  const navItems = [
+    { page: 'dashboard', label: 'Dashboard' },
+    { page: 'income',    label: 'Rendimentos' },
+  ];
+  const navHtml = navItems.map(n =>
+    `<button class="nav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">${n.label}</button>`
+  ).join('');
+
   return `
     <div class="app-shell">
       <header class="topbar">
         <div class="topbar-brand">My<span>Sas</span></div>
+        <nav class="topbar-nav">${navHtml}</nav>
         <div class="topbar-right">
           <div class="user-chip">
             <div class="avatar">${initials}</div>
@@ -401,7 +413,7 @@ async function renderDashboard() {
         <p class="progress-hint">As transações serão adicionadas na próxima fase.</p>
       </div>
     </div>
-  `));
+  `, 'dashboard'));
 
   drawDonutChart([needs, savings, emerg, wants]);
 }
@@ -510,6 +522,159 @@ async function checkProfileAndNavigate() {
   } else {
     navigate('dashboard');
   }
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: RENDIMENTOS
+══════════════════════════════════════ */
+async function renderIncome() {
+  const sym  = currencySymbol();
+  const rows = await loadIncomeRows();
+  const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const label = new Date(year, mon - 1, 1).toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Rendimentos</div>
+        <div class="page-subtitle">Regista as tuas entradas de dinheiro</div>
+      </div>
+    </div>
+
+    <div class="month-nav">
+      <button class="btn-month" onclick="changeMonth(-1)">&#8249;</button>
+      <span class="month-label">${label}</span>
+      <button class="btn-month" onclick="changeMonth(1)">&#8250;</button>
+      <span class="month-total">${sym} ${fmt(total)}</span>
+    </div>
+
+    <div class="card income-form-card">
+      <div class="dash-section-title">Adicionar rendimento</div>
+      <div id="income-alert" class="alert alert-error"></div>
+      <div class="income-form-grid">
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="inc-type">
+            <option value="Salário">Salário</option>
+            <option value="Freelance">Freelance</option>
+            <option value="Arrendamento">Arrendamento</option>
+            <option value="Dividendos">Dividendos</option>
+            <option value="Pensão">Pensão</option>
+            <option value="Outros">Outros</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Valor</label>
+          <div class="input-prefix">
+            <span>${sym}</span>
+            <input id="inc-amount" type="number" min="0.01" step="0.01" placeholder="0.00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Data</label>
+          <input id="inc-date" type="date" value="${viewMonth}-01" />
+        </div>
+        <div class="form-group">
+          <label>Descrição</label>
+          <input id="inc-desc" type="text" placeholder="Opcional" />
+        </div>
+      </div>
+      <button class="btn btn-primary income-submit-btn" id="inc-btn" onclick="submitIncome()">Adicionar</button>
+    </div>
+
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Rendimentos de ${label}</div>
+      ${rows.length === 0
+        ? `<p class="progress-hint">Ainda não há rendimentos neste mês.</p>`
+        : rows.map(r => incomeRow(r, sym)).join('')
+      }
+    </div>
+  `, 'income'));
+}
+
+async function loadIncomeRows() {
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const start = `${viewMonth}-01`;
+  const lastDay = new Date(year, mon, 0).getDate();
+  const end   = `${viewMonth}-${String(lastDay).padStart(2, '0')}`;
+  const { data } = await sb.from('income')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .gte('date', start)
+    .lte('date', end)
+    .order('date', { ascending: false });
+  return data || [];
+}
+
+function incomeRow(r, sym) {
+  const date = new Date(r.date + 'T00:00:00').toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' });
+  return `
+    <div class="income-item">
+      <div class="income-item-left">
+        <span class="income-type-badge">${r.type}</span>
+        <span class="income-desc">${r.description || ''}</span>
+      </div>
+      <div class="income-item-right">
+        <span class="income-amount">${sym} ${fmt(r.amount)}</span>
+        <span class="income-date">${date}</span>
+        <button class="btn-delete" onclick="deleteIncome('${r.id}')" title="Apagar">&#10005;</button>
+      </div>
+    </div>`;
+}
+
+async function submitIncome() {
+  const type   = document.getElementById('inc-type').value;
+  const amount = parseFloat(document.getElementById('inc-amount').value);
+  const date   = document.getElementById('inc-date').value;
+  const desc   = document.getElementById('inc-desc').value.trim();
+  const btn    = document.getElementById('inc-btn');
+  const alertEl = document.getElementById('income-alert');
+  alertEl.className = 'alert alert-error';
+
+  if (!amount || amount <= 0) {
+    alertEl.textContent = 'Introduz um valor válido.';
+    alertEl.classList.add('show');
+    return;
+  }
+  if (!date) {
+    alertEl.textContent = 'Selecciona uma data.';
+    alertEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'A adicionar…';
+
+  const { error } = await sb.from('income').insert({
+    user_id:     currentUser.id,
+    type,
+    amount,
+    date,
+    description: desc || null
+  });
+
+  if (error) {
+    alertEl.textContent = 'Erro: ' + error.message;
+    alertEl.classList.add('show');
+    btn.disabled = false;
+    btn.textContent = 'Adicionar';
+    return;
+  }
+
+  await renderIncome();
+}
+
+async function deleteIncome(id) {
+  await sb.from('income').delete().eq('id', id).eq('user_id', currentUser.id);
+  await renderIncome();
+}
+
+function changeMonth(delta) {
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const d = new Date(year, mon - 1 + delta, 1);
+  viewMonth = d.toISOString().slice(0, 7);
+  renderIncome();
 }
 
 /* ══════════════════════════════════════
