@@ -66,6 +66,19 @@ const { error } = await sb.from('tabela').upsert({ user_id: currentUser.id, ... 
 
 ## Tabelas Supabase
 
+### `expenses`
+```sql
+id          UUID DEFAULT gen_random_uuid() PRIMARY KEY
+user_id     UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL
+category    TEXT NOT NULL  -- Casa | Comida | Transporte | Saúde | Lazer | Tecnologia | Outros
+amount      DECIMAL(12,2) NOT NULL
+date        DATE NOT NULL
+description TEXT
+created_at  TIMESTAMPTZ DEFAULT NOW()
+```
+RLS activa — SELECT/INSERT/DELETE por `auth.uid() = user_id`.
+Categorias definidas em `EXPENSE_CATS` (js/app.js) com campo `split: 'needs' | 'wants'`.
+
 ### `financial_profiles`
 ```sql
 user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE
@@ -108,23 +121,24 @@ RLS activa — utilizador só vê/edita o seu próprio registo.
 ### ✅ Fase 2 — Dashboard principal
 - 4 cards de visão geral (Necessidades, Poupança, Emergência, Lazer)
 - Gráfico donut desenhado em canvas (sem dependências externas)
-- Barras de progresso mensal por categoria (gastos reais virão na Fase 5)
+- Barras de progresso mensal com gastos reais de despesas
 
-### 🔄 Fase 3 — Gestão de rendimentos ← PRÓXIMA
+### ✅ Fase 3 — Gestão de rendimentos
 - Formulário de adicionar rendimento (tipo, valor, data, descrição)
 - Listagem de rendimentos por mês
 
-### ⬜ Fase 4 — Sistema automático de repartição
+### ✅ Fase 4 — Sistema automático de repartição
 - Lógica de cálculo 50/25/15/10 (ou percentagens do perfil)
-- Aplicar repartição automaticamente ao registar rendimento
-- Distinguir valor planeado vs. valor real movido
+- Preview de repartição em tempo real no formulário de rendimento
+- Resumo mensal da repartição
 
-### ⬜ Fase 5 — Gestão de despesas
+### ✅ Fase 5 — Gestão de despesas
 - Formulário de despesa (categoria, valor, data)
 - Categorias: Casa, Comida, Transporte, Saúde, Lazer, Tecnologia, Outros
-- Resumo de gastos do mês por categoria
+- Resumo de gastos do mês por categoria (barras de progresso)
+- Dashboard atualizado com gastos reais vs orçamento
 
-### ⬜ Fase 6 — Reserva de emergência
+### 🔄 Fase 6 — Reserva de emergência ← PRÓXIMA
 - Definir reserva alvo
 - Acompanhar valor actual e progresso (%)
 - Calcular meses de protecção com base nas despesas médias

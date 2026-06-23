@@ -9,6 +9,17 @@ let currentUser  = null;
 let viewMonth    = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
 let incomeProfile = null; // cache do perfil para preview de repartição
 
+/* ── Categorias de despesa ── */
+const EXPENSE_CATS = [
+  { name: 'Casa',       color: '#3b82f6', icon: '🏠', split: 'needs' },
+  { name: 'Comida',     color: '#f59e0b', icon: '🍽️', split: 'needs' },
+  { name: 'Transporte', color: '#8b5cf6', icon: '🚗', split: 'needs' },
+  { name: 'Saúde',      color: '#22c55e', icon: '💊', split: 'needs' },
+  { name: 'Lazer',      color: '#ec4899', icon: '🎮', split: 'wants' },
+  { name: 'Tecnologia', color: '#06b6d4', icon: '💻', split: 'wants' },
+  { name: 'Outros',     color: '#6b7280', icon: '📦', split: 'wants' },
+];
+
 /* ── Render helper ── */
 function render(html) {
   document.getElementById('app').innerHTML = html;
@@ -29,6 +40,7 @@ function navigate(page) {
     case 'profile-setup': renderProfileSetup(); break;
     case 'dashboard':     renderDashboard();    break;
     case 'income':        renderIncome();       break;
+    case 'expenses':      renderExpenses();     break;
     default:              renderLogin();
   }
 }
@@ -43,6 +55,7 @@ function appShell(content, activePage = '') {
   const navItems = [
     { page: 'dashboard', label: 'Dashboard' },
     { page: 'income',    label: 'Rendimentos' },
+    { page: 'expenses',  label: 'Despesas' },
   ];
   const navHtml = navItems.map(n =>
     `<button class="nav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">${n.label}</button>`
@@ -58,6 +71,11 @@ function appShell(content, activePage = '') {
       page: 'income',
       label: 'Rendimentos',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`
+    },
+    {
+      page: 'expenses',
+      label: 'Despesas',
+      icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>`
     }
   ];
   const bnavHtml = bnavItems.map(n =>
@@ -372,9 +390,18 @@ async function submitProfile() {
    PÁGINA: DASHBOARD
 ══════════════════════════════════════ */
 async function renderDashboard() {
-  const { data: profile } = await sb.from('financial_profiles')
-    .select('*').eq('user_id', currentUser.id).maybeSingle();
+  const now = new Date();
+  const dashMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const dashStart = `${dashMonth}-01`;
+  const dashEnd   = `${dashMonth}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
 
+  const [profileRes, expRes] = await Promise.all([
+    sb.from('financial_profiles').select('*').eq('user_id', currentUser.id).maybeSingle(),
+    sb.from('expenses').select('category, amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd)
+  ]);
+
+  const profile  = profileRes.data;
+  const expenses = expRes.data || [];
   const sym      = currencySymbol();
   const salary   = Number(profile?.monthly_salary  || 0);
   const needs    = Number(profile?.split_needs     ?? 50);
@@ -387,7 +414,10 @@ async function renderDashboard() {
   const amtEmerg  = salary * emerg   / 100;
   const amtWants  = salary * wants   / 100;
 
-  const month = new Date().toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+  const spentNeeds = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
+  const spentWants = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
+
+  const month = now.toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
 
   render(appShell(`
     <div class="page-header">
@@ -425,12 +455,12 @@ async function renderDashboard() {
       <div class="card">
         <div class="dash-section-title">Progresso mensal</div>
         <div class="progress-list">
-          ${progressItem('Necessidades',            0, amtNeeds, sym, 'var(--info)')}
-          ${progressItem('Poupança / Investimento', 0, amtSav,   sym, 'var(--success)')}
-          ${progressItem('Reserva de emergência',   0, amtEmerg, sym, 'var(--warning)')}
-          ${progressItem('Lazer / Desejos',         0, amtWants, sym, 'var(--primary)')}
+          ${progressItem('Necessidades',            spentNeeds, amtNeeds, sym, 'var(--info)')}
+          ${progressItem('Poupança / Investimento', 0,          amtSav,   sym, 'var(--success)')}
+          ${progressItem('Reserva de emergência',   0,          amtEmerg, sym, 'var(--warning)')}
+          ${progressItem('Lazer / Desejos',         spentWants, amtWants, sym, 'var(--primary)')}
         </div>
-        <p class="progress-hint">As transações serão adicionadas na próxima fase.</p>
+        ${expenses.length === 0 ? `<p class="progress-hint">Regista as tuas despesas para ver o progresso.</p>` : ''}
       </div>
     </div>
   `, 'dashboard'));
@@ -769,6 +799,193 @@ function changeMonth(delta) {
   const d = new Date(year, mon - 1 + delta, 1);
   viewMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   renderIncome();
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: DESPESAS
+══════════════════════════════════════ */
+async function renderExpenses() {
+  const sym = currencySymbol();
+  const now = new Date();
+  const todayStr   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const defaultDate = viewMonth === todayStr.slice(0, 7) ? todayStr : `${viewMonth}-01`;
+
+  const [rows, profileRes] = await Promise.all([
+    loadExpenseRows(),
+    sb.from('financial_profiles').select('monthly_salary, split_needs, split_wants').eq('user_id', currentUser.id).maybeSingle()
+  ]);
+
+  const total = rows.reduce((s, r) => s + Number(r.amount), 0);
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const label = new Date(year, mon - 1, 1).toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+
+  const byCategory = {};
+  rows.forEach(r => { byCategory[r.category] = (byCategory[r.category] || 0) + Number(r.amount); });
+
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Despesas</div>
+        <div class="page-subtitle">Regista os teus gastos do mês</div>
+      </div>
+    </div>
+
+    <div class="month-nav">
+      <button class="btn-month" onclick="changeMonthExpenses(-1)">&#8249;</button>
+      <span class="month-label">${label}</span>
+      <button class="btn-month" onclick="changeMonthExpenses(1)">&#8250;</button>
+      <span class="month-total" style="color:var(--danger)">${sym} ${fmt(total)}</span>
+    </div>
+
+    <div class="card income-form-card">
+      <div class="dash-section-title">Adicionar despesa</div>
+      <div id="exp-alert" class="alert alert-error"></div>
+      <div class="income-form-grid">
+        <div class="form-group">
+          <label>Categoria</label>
+          <select id="exp-cat">
+            ${EXPENSE_CATS.map(c => `<option value="${c.name}">${c.icon} ${c.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Valor</label>
+          <div class="input-prefix">
+            <span>${sym}</span>
+            <input id="exp-amount" type="number" min="0.01" step="0.01" placeholder="0.00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Data</label>
+          <input id="exp-date" type="date" value="${defaultDate}" />
+        </div>
+        <div class="form-group">
+          <label>Descrição</label>
+          <input id="exp-desc" type="text" placeholder="Opcional" />
+        </div>
+      </div>
+      <button class="btn btn-primary income-submit-btn" id="exp-btn" onclick="submitExpense()">Adicionar despesa</button>
+    </div>
+
+    ${total > 0 ? expenseCategorySummary(byCategory, total, sym) : ''}
+
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Despesas de ${label}</div>
+      ${rows.length === 0
+        ? `<p class="progress-hint">Ainda não há despesas neste mês.</p>`
+        : rows.map(r => expenseRow(r, sym)).join('')
+      }
+    </div>
+  `, 'expenses'));
+}
+
+function expenseCategorySummary(byCategory, total, sym) {
+  const items = EXPENSE_CATS
+    .filter(c => byCategory[c.name])
+    .map(c => {
+      const amount = byCategory[c.name];
+      const pct    = Math.round(amount / total * 100);
+      return `
+        <div class="prog-item">
+          <div class="prog-header">
+            <span class="prog-label">${c.icon} ${c.name}</span>
+            <span class="prog-values">${sym} ${fmt(amount)} <span class="prog-sep">·</span> ${pct}%</span>
+          </div>
+          <div class="prog-track">
+            <div class="prog-fill" style="width:${pct}%;background:${c.color}"></div>
+          </div>
+        </div>`;
+    }).join('');
+
+  return `
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Por categoria</div>
+      <div class="progress-list">${items}</div>
+    </div>`;
+}
+
+async function loadExpenseRows() {
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const start   = `${viewMonth}-01`;
+  const lastDay = new Date(year, mon, 0).getDate();
+  const end     = `${viewMonth}-${String(lastDay).padStart(2, '0')}`;
+  const { data } = await sb.from('expenses')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .gte('date', start)
+    .lte('date', end)
+    .order('date', { ascending: false });
+  return data || [];
+}
+
+function expenseRow(r, sym) {
+  const cat  = EXPENSE_CATS.find(c => c.name === r.category) || { color: '#6b7280', icon: '📦' };
+  const date = new Date(r.date + 'T00:00:00').toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' });
+  return `
+    <div class="income-item">
+      <div class="income-item-left">
+        <span class="income-type-badge" style="background:${cat.color}22;color:${cat.color};border-color:${cat.color}44">${cat.icon} ${r.category}</span>
+        <span class="income-desc">${r.description || ''}</span>
+      </div>
+      <div class="income-item-right">
+        <span class="income-amount" style="color:var(--danger)">${sym} ${fmt(r.amount)}</span>
+        <span class="income-date">${date}</span>
+        <button class="btn-delete" onclick="deleteExpense('${r.id}')" title="Apagar">&#10005;</button>
+      </div>
+    </div>`;
+}
+
+async function submitExpense() {
+  const category = document.getElementById('exp-cat').value;
+  const amount   = parseFloat(document.getElementById('exp-amount').value);
+  const date     = document.getElementById('exp-date').value;
+  const desc     = document.getElementById('exp-desc').value.trim();
+  const btn      = document.getElementById('exp-btn');
+  const alertEl  = document.getElementById('exp-alert');
+  alertEl.className = 'alert alert-error';
+
+  if (!amount || amount <= 0) {
+    alertEl.textContent = 'Introduz um valor válido.';
+    alertEl.classList.add('show');
+    return;
+  }
+  if (!date) {
+    alertEl.textContent = 'Selecciona uma data.';
+    alertEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = 'A adicionar…';
+
+  const { error } = await sb.from('expenses').insert({
+    user_id:     currentUser.id,
+    category,
+    amount,
+    date,
+    description: desc || null
+  });
+
+  if (error) {
+    alertEl.textContent = 'Erro: ' + error.message;
+    alertEl.classList.add('show');
+    btn.disabled    = false;
+    btn.textContent = 'Adicionar despesa';
+    return;
+  }
+
+  await renderExpenses();
+}
+
+async function deleteExpense(id) {
+  await sb.from('expenses').delete().eq('id', id).eq('user_id', currentUser.id);
+  await renderExpenses();
+}
+
+function changeMonthExpenses(delta) {
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const d = new Date(year, mon - 1 + delta, 1);
+  viewMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  renderExpenses();
 }
 
 /* ══════════════════════════════════════
