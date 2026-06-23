@@ -767,7 +767,7 @@ async function deleteIncome(id) {
 function changeMonth(delta) {
   const [year, mon] = viewMonth.split('-').map(Number);
   const d = new Date(year, mon - 1 + delta, 1);
-  viewMonth = d.toISOString().slice(0, 7);
+  viewMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   renderIncome();
 }
 
