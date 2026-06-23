@@ -33,6 +33,17 @@ const SUPABASE_ANON = 'eyJhbGci...'; // anon/public key — seguro expor no fron
 
 A `SUPABASE_ANON` é a **legacy anon key** (formato `eyJ...`). O RLS protege os dados.
 
+## Regra de design — Mobile first (OBRIGATÓRIO)
+
+O utilizador usa a aplicação **no telemóvel**. Todas as páginas e componentes devem ser desenhados primeiro para mobile e depois expandidos para desktop.
+
+- Layout padrão: **1 coluna**, expandir para mais colunas em ecrãs maiores (`min-width`)
+- Touch targets mínimos: **48px de altura** em todos os botões e inputs
+- Navegação: **bottom nav** no mobile (fixa em baixo), topbar nav apenas no desktop
+- Grids: mobile=1-2 col → tablet=2-3 col → desktop=4 col
+- Nunca esconder funcionalidades no mobile — adaptar o layout
+- Testar sempre com viewport 390px (iPhone) antes de considerar completo
+
 ## Convenções de código
 
 - Funções de página: `renderXxx()` — async quando precisam de dados do Supabase

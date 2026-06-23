@@ -48,6 +48,24 @@ function appShell(content, activePage = '') {
     `<button class="nav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">${n.label}</button>`
   ).join('');
 
+  const bnavItems = [
+    {
+      page: 'dashboard',
+      label: 'Dashboard',
+      icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>`
+    },
+    {
+      page: 'income',
+      label: 'Rendimentos',
+      icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`
+    }
+  ];
+  const bnavHtml = bnavItems.map(n =>
+    `<button class="bnav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">
+      ${n.icon}<span>${n.label}</span>
+    </button>`
+  ).join('');
+
   return `
     <div class="app-shell">
       <header class="topbar">
@@ -56,12 +74,13 @@ function appShell(content, activePage = '') {
         <div class="topbar-right">
           <div class="user-chip">
             <div class="avatar">${initials}</div>
-            ${first}
+            <span class="user-name">${first}</span>
           </div>
           <button class="btn-logout" onclick="logout()">Sair</button>
         </div>
       </header>
       <main class="main-content">${content}</main>
+      <nav class="bottom-nav">${bnavHtml}</nav>
     </div>`;
 }
 
