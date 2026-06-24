@@ -79,6 +79,21 @@ created_at  TIMESTAMPTZ DEFAULT NOW()
 RLS activa — SELECT/INSERT/DELETE por `auth.uid() = user_id`.
 Categorias definidas em `EXPENSE_CATS` (js/app.js) com campo `split: 'needs' | 'wants'`.
 
+### `investments`
+```sql
+id            UUID DEFAULT gen_random_uuid() PRIMARY KEY
+user_id       UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL
+name          TEXT NOT NULL
+type          TEXT NOT NULL  -- Ações | ETF | Cripto | Obrigações | Imobiliário | Fundos | Outros
+amount        DECIMAL(12,2) NOT NULL   -- valor investido original
+current_value DECIMAL(12,2)            -- valor actual (opcional)
+date          DATE NOT NULL
+description   TEXT
+created_at    TIMESTAMPTZ DEFAULT NOW()
+```
+RLS activa — SELECT/INSERT/DELETE por `auth.uid() = user_id`.
+Tipos definidos em `INVESTMENT_TYPES` (js/app.js) com cor por tipo.
+
 ### `emergency_fund`
 ```sql
 user_id        UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE
@@ -154,13 +169,13 @@ RLS activa — utilizador só vê/edita o seu próprio registo.
 - Calcular meses de proteção com base na média de despesas dos últimos 3 meses
 - Registar depósitos e levantamentos
 
-### 🔄 Fase 7 — Investimentos ← PRÓXIMA
+### ✅ Fase 7 — Investimentos
 
 ### ⬜ Fase 7 — Investimentos
 - Adicionar activo (tipo, nome, valor, data, rentabilidade)
 - Composição da carteira (% por activo)
 
-### ⬜ Fase 8 — Renda fixa
+### 🔄 Fase 8 — Renda fixa ← PRÓXIMA
 - Registar depósitos a prazo / aplicações
 - Calcular rendimento esperado
 

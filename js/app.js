@@ -9,6 +9,17 @@ let currentUser  = null;
 let viewMonth    = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
 let incomeProfile = null; // cache do perfil para preview de repartição
 
+/* ── Tipos de investimento ── */
+const INVESTMENT_TYPES = [
+  { name: 'Ações',        color: '#7c6aff', icon: '📈' },
+  { name: 'ETF',          color: '#3b82f6', icon: '📊' },
+  { name: 'Cripto',       color: '#f59e0b', icon: '₿'  },
+  { name: 'Obrigações',   color: '#22c55e', icon: '📋' },
+  { name: 'Imobiliário',  color: '#ec4899', icon: '🏢' },
+  { name: 'Fundos',       color: '#06b6d4', icon: '💼' },
+  { name: 'Outros',       color: '#6b7280', icon: '📦' },
+];
+
 /* ── Categorias de despesa ── */
 const EXPENSE_CATS = [
   { name: 'Casa',       color: '#3b82f6', icon: '🏠', split: 'needs' },
@@ -41,7 +52,8 @@ function navigate(page) {
     case 'dashboard':     renderDashboard();    break;
     case 'income':        renderIncome();       break;
     case 'expenses':      renderExpenses();     break;
-    case 'emergency':     renderEmergencyFund(); break;
+    case 'emergency':     renderEmergencyFund();  break;
+    case 'investments':   renderInvestments();    break;
     default:              renderLogin();
   }
 }
@@ -54,10 +66,11 @@ function appShell(content, activePage = '') {
   const first    = fullName.split(' ')[0];
 
   const navItems = [
-    { page: 'dashboard', label: 'Dashboard' },
-    { page: 'income',    label: 'Rendimentos' },
-    { page: 'expenses',  label: 'Despesas' },
-    { page: 'emergency', label: 'Emergência' },
+    { page: 'dashboard',   label: 'Dashboard' },
+    { page: 'income',      label: 'Rendimentos' },
+    { page: 'expenses',    label: 'Despesas' },
+    { page: 'emergency',   label: 'Emergência' },
+    { page: 'investments', label: 'Investimentos' },
   ];
   const navHtml = navItems.map(n =>
     `<button class="nav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">${n.label}</button>`
@@ -66,23 +79,28 @@ function appShell(content, activePage = '') {
   const bnavItems = [
     {
       page: 'dashboard',
-      label: 'Dashboard',
+      label: 'Início',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>`
     },
     {
       page: 'income',
-      label: 'Rendimentos',
+      label: 'Entradas',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`
     },
     {
       page: 'expenses',
-      label: 'Despesas',
+      label: 'Gastos',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>`
     },
     {
       page: 'emergency',
-      label: 'Emergência',
+      label: 'Reserva',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`
+    },
+    {
+      page: 'investments',
+      label: 'Carteira',
+      icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`
     }
   ];
   const bnavHtml = bnavItems.map(n =>
@@ -1139,6 +1157,214 @@ async function submitEmergencyMovement(currentAmount) {
   }
 
   await renderEmergencyFund();
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: INVESTIMENTOS
+══════════════════════════════════════ */
+async function renderInvestments() {
+  const sym = currencySymbol();
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const { data } = await sb.from('investments')
+    .select('*').eq('user_id', currentUser.id).order('date', { ascending: false });
+  const assets = data || [];
+
+  const totalInvested = assets.reduce((s, a) => s + Number(a.amount), 0);
+  const totalCurrent  = assets.reduce((s, a) => s + Number(a.current_value ?? a.amount), 0);
+  const absReturn     = totalCurrent - totalInvested;
+  const pctReturn     = totalInvested > 0 ? (absReturn / totalInvested * 100) : 0;
+
+  const byType = {};
+  assets.forEach(a => {
+    byType[a.type] = (byType[a.type] || 0) + Number(a.current_value ?? a.amount);
+  });
+
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Investimentos</div>
+        <div class="page-subtitle">Composição da carteira</div>
+      </div>
+    </div>
+
+    ${assets.length > 0 ? invSummaryCard(totalInvested, totalCurrent, absReturn, pctReturn, sym) : ''}
+    ${assets.length > 0 ? invCompositionCard(byType, totalCurrent, sym) : ''}
+
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Adicionar activo</div>
+      <div id="inv-alert" class="alert alert-error"></div>
+      <div class="inv-form-grid">
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="inv-type">
+            ${INVESTMENT_TYPES.map(t => `<option value="${t.name}">${t.icon} ${t.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Nome</label>
+          <input id="inv-name" type="text" placeholder="ex: IWDA, Bitcoin, Apartamento…" />
+        </div>
+        <div class="form-group">
+          <label>Data</label>
+          <input id="inv-date" type="date" value="${todayStr}" />
+        </div>
+        <div class="form-group">
+          <label>Valor investido</label>
+          <div class="input-prefix">
+            <span>${sym}</span>
+            <input id="inv-amount" type="number" min="0.01" step="0.01" placeholder="0.00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Valor actual <span class="label-opt">(opcional)</span></label>
+          <div class="input-prefix">
+            <span>${sym}</span>
+            <input id="inv-current" type="number" min="0" step="0.01" placeholder="0.00" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Descrição <span class="label-opt">(opcional)</span></label>
+          <input id="inv-desc" type="text" placeholder="Notas sobre o activo" />
+        </div>
+      </div>
+      <button class="btn btn-primary" id="inv-btn" onclick="submitInvestment()">Adicionar activo</button>
+    </div>
+
+    ${assets.length > 0 ? `
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Carteira — ${assets.length} activo${assets.length !== 1 ? 's' : ''}</div>
+      ${assets.map(a => invRow(a, sym)).join('')}
+    </div>` : ''}
+  `, 'investments'));
+}
+
+function invSummaryCard(invested, current, absReturn, pctReturn, sym) {
+  const color = absReturn >= 0 ? 'var(--success)' : 'var(--danger)';
+  const sign  = absReturn >= 0 ? '+' : '';
+  return `
+    <div class="card inv-summary-card">
+      <div class="inv-summary-grid">
+        <div class="inv-summary-item">
+          <div class="inv-summary-label">Total investido</div>
+          <div class="inv-summary-value">${sym} ${fmt(invested)}</div>
+        </div>
+        <div class="inv-summary-item">
+          <div class="inv-summary-label">Valor actual</div>
+          <div class="inv-summary-value">${sym} ${fmt(current)}</div>
+        </div>
+        <div class="inv-summary-item">
+          <div class="inv-summary-label">Rentabilidade</div>
+          <div class="inv-summary-value" style="color:${color}">${sign}${pctReturn.toFixed(1)}%</div>
+          <div class="inv-summary-abs" style="color:${color}">${sign}${sym} ${fmt(Math.abs(absReturn))}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function invCompositionCard(byType, totalCurrent, sym) {
+  const items = INVESTMENT_TYPES
+    .filter(t => byType[t.name])
+    .map(t => {
+      const val = byType[t.name];
+      const pct = totalCurrent > 0 ? Math.round(val / totalCurrent * 100) : 0;
+      return `
+        <div class="prog-item">
+          <div class="prog-header">
+            <span class="prog-label">${t.icon} ${t.name}</span>
+            <span class="prog-values">${sym} ${fmt(val)} <span class="prog-sep">·</span> ${pct}%</span>
+          </div>
+          <div class="prog-track">
+            <div class="prog-fill" style="width:${pct}%;background:${t.color}"></div>
+          </div>
+        </div>`;
+    }).join('');
+  return `
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Composição</div>
+      <div class="progress-list">${items}</div>
+    </div>`;
+}
+
+function invRow(a, sym) {
+  const t        = INVESTMENT_TYPES.find(x => x.name === a.type) || { color: '#6b7280', icon: '📦' };
+  const invested = Number(a.amount);
+  const current  = Number(a.current_value ?? a.amount);
+  const absRet   = current - invested;
+  const pctRet   = invested > 0 ? (absRet / invested * 100) : 0;
+  const retColor = absRet >= 0 ? 'var(--success)' : 'var(--danger)';
+  const sign     = absRet >= 0 ? '+' : '';
+  const date     = new Date(a.date + 'T00:00:00').toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const hasVal   = a.current_value !== null && a.current_value !== undefined;
+
+  return `
+    <div class="inv-item">
+      <div class="inv-item-top">
+        <span class="income-type-badge" style="background:${t.color}22;color:${t.color};border-color:${t.color}44">${t.icon} ${a.type}</span>
+        <span class="inv-name">${a.name}</span>
+        ${hasVal ? `<span class="inv-return" style="color:${retColor}">${sign}${pctRet.toFixed(1)}%</span>` : ''}
+        <button class="btn-delete" onclick="deleteInvestment('${a.id}')" title="Apagar">&#10005;</button>
+      </div>
+      <div class="inv-item-vals">
+        <span>${sym} ${fmt(invested)}</span>
+        ${hasVal ? `<span class="inv-arrow">→</span><span style="color:${retColor}">${sym} ${fmt(current)}</span>` : ''}
+        <span class="inv-date-val">${date}</span>
+      </div>
+      ${a.description ? `<div class="inv-item-desc">${a.description}</div>` : ''}
+    </div>`;
+}
+
+async function submitInvestment() {
+  const type    = document.getElementById('inv-type').value;
+  const name    = document.getElementById('inv-name').value.trim();
+  const amount  = parseFloat(document.getElementById('inv-amount').value);
+  const curRaw  = document.getElementById('inv-current').value;
+  const current = curRaw ? parseFloat(curRaw) : null;
+  const date    = document.getElementById('inv-date').value;
+  const desc    = document.getElementById('inv-desc').value.trim();
+  const btn     = document.getElementById('inv-btn');
+  const alertEl = document.getElementById('inv-alert');
+  alertEl.className = 'alert alert-error';
+
+  if (!name) {
+    alertEl.textContent = 'Introduz o nome do activo.';
+    alertEl.classList.add('show');
+    return;
+  }
+  if (!amount || amount <= 0) {
+    alertEl.textContent = 'Introduz um valor investido válido.';
+    alertEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled    = true;
+  btn.textContent = 'A adicionar…';
+
+  const { error } = await sb.from('investments').insert({
+    user_id:       currentUser.id,
+    type,
+    name,
+    amount,
+    current_value: current,
+    date,
+    description:   desc || null
+  });
+
+  if (error) {
+    alertEl.textContent = 'Erro: ' + error.message;
+    alertEl.classList.add('show');
+    btn.disabled    = false;
+    btn.textContent = 'Adicionar activo';
+    return;
+  }
+
+  await renderInvestments();
+}
+
+async function deleteInvestment(id) {
+  await sb.from('investments').delete().eq('id', id).eq('user_id', currentUser.id);
+  await renderInvestments();
 }
 
 async function submitEmergencyTarget(currentAmount) {
