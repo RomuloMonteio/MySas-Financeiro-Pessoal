@@ -415,14 +415,19 @@ async function submitProfile() {
    PÁGINA: DASHBOARD
 ══════════════════════════════════════ */
 async function renderDashboard() {
-  const now = new Date();
+  const now       = new Date();
   const dashMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const dashStart = `${dashMonth}-01`;
   const dashEnd   = `${dashMonth}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+  const month     = now.toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
 
-  const [profileRes, expRes] = await Promise.all([
+  const [profileRes, expRes, incRes, invMonthRes, invAllRes, emergRes] = await Promise.all([
     sb.from('financial_profiles').select('*').eq('user_id', currentUser.id).maybeSingle(),
-    sb.from('expenses').select('category, amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd)
+    sb.from('expenses').select('category, amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('income').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('investments').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('investments').select('current_value, amount').eq('user_id', currentUser.id),
+    sb.from('emergency_fund').select('current_amount').eq('user_id', currentUser.id).maybeSingle()
   ]);
 
   const profile  = profileRes.data;
@@ -434,58 +439,84 @@ async function renderDashboard() {
   const emerg    = Number(profile?.split_emergency ?? 15);
   const wants    = Number(profile?.split_wants     ?? 10);
 
-  const amtNeeds  = salary * needs   / 100;
-  const amtSav    = salary * savings / 100;
-  const amtEmerg  = salary * emerg   / 100;
-  const amtWants  = salary * wants   / 100;
+  const amtNeeds = salary * needs   / 100;
+  const amtSav   = salary * savings / 100;
+  const amtEmerg = salary * emerg   / 100;
+  const amtWants = salary * wants   / 100;
 
+  // Cash flow do mês
+  const incomeTotal  = (incRes.data  || []).reduce((s, r) => s + Number(r.amount), 0);
+  const expTotal     = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const invMonth     = (invMonthRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
+  const disponivel   = incomeTotal - expTotal - invMonth;
+  const dispColor    = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
+  const dispSign     = disponivel < 0 ? '-' : '';
+
+  // Património total
+  const invTotal   = (invAllRes.data || []).reduce((s, i) => s + Number(i.current_value ?? i.amount), 0);
+  const emergTotal = Number(emergRes.data?.current_amount || 0);
+  const patrimonio = invTotal + emergTotal + Math.max(0, disponivel);
+
+  // Progresso por categoria
   const spentNeeds = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
   const spentWants = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
-
-  const month = now.toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+  const hasActivity = incomeTotal > 0 || expTotal > 0 || invMonth > 0;
 
   render(appShell(`
     <div class="page-header">
       <div>
         <div class="page-title">Dashboard</div>
-        <div class="page-subtitle">Orçamento de ${month}</div>
+        <div class="page-subtitle">${month.charAt(0).toUpperCase() + month.slice(1)}</div>
       </div>
-      <div class="salary-badge">
-        <span class="salary-label">Salário mensal</span>
-        <span class="salary-value">${sym} ${fmt(salary)}</span>
+    </div>
+
+    <div class="hero-grid">
+      <div class="hero-card" style="border-left:3px solid ${dispColor}">
+        <div class="hero-label">Disponível este mês</div>
+        <div class="hero-value" style="color:${dispColor}">${dispSign}${sym} ${fmt(Math.abs(disponivel))}</div>
+        <div class="hero-sub">
+          ${incomeTotal > 0
+            ? `↑ ${sym} ${fmt(incomeTotal)} &nbsp;·&nbsp; ↓ ${sym} ${fmt(expTotal + invMonth)}`
+            : 'Regista rendimentos para ver o saldo'}
+        </div>
+      </div>
+      <div class="hero-card" style="border-left:3px solid var(--primary)">
+        <div class="hero-label">Património total</div>
+        <div class="hero-value">${sym} ${fmt(patrimonio)}</div>
+        <div class="hero-sub">
+          Invest. ${sym} ${fmt(invTotal)} &nbsp;·&nbsp; Reserva ${sym} ${fmt(emergTotal)}
+        </div>
       </div>
     </div>
 
     <div class="overview-grid">
-      ${ovCard('Necessidades',            amtNeeds, needs,   sym, 'var(--info)')}
-      ${ovCard('Poupança / Investimento', amtSav,   savings, sym, 'var(--success)')}
-      ${ovCard('Reserva de emergência',   amtEmerg, emerg,   sym, 'var(--warning)')}
-      ${ovCard('Lazer / Desejos',         amtWants, wants,   sym, 'var(--primary)')}
+      ${ovCard('Necessidades',          amtNeeds, needs,   sym, 'var(--info)')}
+      ${ovCard('Poupança / Invest.',    amtSav,   savings, sym, 'var(--success)')}
+      ${ovCard('Reserva emergência',    amtEmerg, emerg,   sym, 'var(--warning)')}
+      ${ovCard('Lazer / Desejos',       amtWants, wants,   sym, 'var(--primary)')}
     </div>
 
-    <div class="dashboard-row">
-      <div class="card">
-        <div class="dash-section-title">Distribuição do salário</div>
-        <div class="pie-wrap">
-          <canvas id="pie-chart"></canvas>
-          <div class="pie-legend">
-            ${pieLegendItem('Necessidades', needs,   'var(--info)')}
-            ${pieLegendItem('Poupança',     savings, 'var(--success)')}
-            ${pieLegendItem('Emergência',   emerg,   'var(--warning)')}
-            ${pieLegendItem('Lazer',        wants,   'var(--primary)')}
-          </div>
-        </div>
+    <div class="card">
+      <div class="dash-section-title">Progresso mensal</div>
+      <div class="progress-list">
+        ${progressItem('Necessidades',            spentNeeds, amtNeeds, sym, 'var(--info)')}
+        ${progressItem('Poupança / Investimento', invMonth,   amtSav,   sym, 'var(--success)')}
+        ${progressItem('Reserva de emergência',   0,          amtEmerg, sym, 'var(--warning)')}
+        ${progressItem('Lazer / Desejos',         spentWants, amtWants, sym, 'var(--primary)')}
       </div>
+      ${!hasActivity ? `<p class="progress-hint">Regista rendimentos, despesas e investimentos para ver o progresso.</p>` : ''}
+    </div>
 
-      <div class="card">
-        <div class="dash-section-title">Progresso mensal</div>
-        <div class="progress-list">
-          ${progressItem('Necessidades',            spentNeeds, amtNeeds, sym, 'var(--info)')}
-          ${progressItem('Poupança / Investimento', 0,          amtSav,   sym, 'var(--success)')}
-          ${progressItem('Reserva de emergência',   0,          amtEmerg, sym, 'var(--warning)')}
-          ${progressItem('Lazer / Desejos',         spentWants, amtWants, sym, 'var(--primary)')}
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Distribuição do orçamento</div>
+      <div class="pie-wrap">
+        <canvas id="pie-chart"></canvas>
+        <div class="pie-legend">
+          ${pieLegendItem('Necessidades', needs,   'var(--info)')}
+          ${pieLegendItem('Poupança',     savings, 'var(--success)')}
+          ${pieLegendItem('Emergência',   emerg,   'var(--warning)')}
+          ${pieLegendItem('Lazer',        wants,   'var(--primary)')}
         </div>
-        ${expenses.length === 0 ? `<p class="progress-hint">Regista as tuas despesas para ver o progresso.</p>` : ''}
       </div>
     </div>
   `, 'dashboard'));

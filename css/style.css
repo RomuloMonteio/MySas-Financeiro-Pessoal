@@ -375,6 +375,49 @@ body {
 
 .salary-value { font-size: 1.125rem; font-weight: 700; margin-top: 2px; }
 
+/* ── Hero metrics ── */
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (min-width: 480px) {
+  .hero-grid { grid-template-columns: 1fr 1fr; }
+}
+
+.hero-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.hero-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+}
+
+.hero-value {
+  font-size: 1.625rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+  line-height: 1.1;
+}
+
+@media (min-width: 640px) {
+  .hero-value { font-size: 2rem; }
+}
+
+.hero-sub { font-size: 0.75rem; color: var(--text2); line-height: 1.5; }
+
 /* ── Overview cards ── */
 .overview-grid {
   display: grid;
