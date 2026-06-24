@@ -13,7 +13,8 @@
       "Bash(git -C /home/romy/Documentos/GitHub/MySas-Financeiro-Pessoal show 9639050:index.html)",
       "Bash(git -C /home/romy/Documentos/GitHub/MySas-Financeiro-Pessoal log --oneline origin/main)",
       "Bash(git -C /home/romy/Documentos/GitHub/MySas-Financeiro-Pessoal add db/index.js)",
-      "Bash(git -C /home/romy/Documentos/GitHub/MySas-Financeiro-Pessoal commit -m ' *)"
+      "Bash(git -C /home/romy/Documentos/GitHub/MySas-Financeiro-Pessoal commit -m ' *)",
+      "Bash(node --check /home/romy/Documentos/GitHub/MySas-Financeiro-Pessoal/js/app.js)"
     ]
   }
 }

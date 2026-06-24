@@ -115,10 +115,10 @@ function appShell(content, activePage = '') {
         <div class="topbar-brand">My<span>Sas</span></div>
         <nav class="topbar-nav">${navHtml}</nav>
         <div class="topbar-right">
-          <div class="user-chip">
+          <button class="user-chip" onclick="navigate('profile-setup')" title="Perfil e configurações">
             <div class="avatar">${initials}</div>
             <span class="user-name">${first}</span>
-          </div>
+          </button>
           <button class="btn-logout" onclick="logout()">Sair</button>
         </div>
       </header>
@@ -349,7 +349,7 @@ async function renderProfileSetup() {
           <span>Atalho iPhone (Apple Pay)</span>
         </div>
         <p style="color:var(--text2);font-size:0.875rem;margin:0.25rem 0 1rem">
-          Gera um token pessoal para ligar o iOS Shortcuts ao MySas. Após configurares a Automatização no iPhone, cada pagamento Apple Pay da CGD adiciona a despesa automaticamente.
+          Gera um token pessoal e configura uma Automatização iOS Shortcuts com trigger <strong>Wallet</strong>. Cada vez que pagares com Apple Pay, o iPhone pergunta o valor e a categoria, e a despesa é adicionada ao MySas automaticamente.
         </p>
         <div id="api-token-alert" class="alert alert-error"></div>
         ${hasToken ? `

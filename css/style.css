@@ -233,7 +233,11 @@ body {
   border: 1px solid var(--border);
   border-radius: 99px;
   padding: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
 }
+.user-chip:hover { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--bg3)); }
 
 @media (min-width: 640px) {
   .user-chip { padding: 4px 12px 4px 4px; }
