@@ -421,13 +421,14 @@ async function renderDashboard() {
   const dashEnd   = `${dashMonth}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
   const month     = now.toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
 
-  const [profileRes, expRes, incRes, invMonthRes, invAllRes, emergRes] = await Promise.all([
+  const [profileRes, expRes, incRes, invMonthRes, invAllRes, emergRes, emergTxRes] = await Promise.all([
     sb.from('financial_profiles').select('*').eq('user_id', currentUser.id).maybeSingle(),
     sb.from('expenses').select('category, amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
     sb.from('income').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
     sb.from('investments').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
     sb.from('investments').select('current_value, amount').eq('user_id', currentUser.id),
-    sb.from('emergency_fund').select('current_amount').eq('user_id', currentUser.id).maybeSingle()
+    sb.from('emergency_fund').select('current_amount').eq('user_id', currentUser.id).maybeSingle(),
+    sb.from('emergency_transactions').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd)
   ]);
 
   const profile  = profileRes.data;
@@ -458,9 +459,10 @@ async function renderDashboard() {
   const patrimonio = invTotal + emergTotal + Math.max(0, disponivel);
 
   // Progresso por categoria
-  const spentNeeds = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
-  const spentWants = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
-  const hasActivity = incomeTotal > 0 || expTotal > 0 || invMonth > 0;
+  const spentNeeds   = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
+  const spentWants   = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
+  const emergDeposits = (emergTxRes.data || []).filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
+  const hasActivity  = incomeTotal > 0 || expTotal > 0 || invMonth > 0;
 
   render(appShell(`
     <div class="page-header">
@@ -501,7 +503,7 @@ async function renderDashboard() {
       <div class="progress-list">
         ${progressItem('Necessidades',            spentNeeds, amtNeeds, sym, 'var(--info)')}
         ${progressItem('Poupança / Investimento', invMonth,   amtSav,   sym, 'var(--success)')}
-        ${progressItem('Reserva de emergência',   0,          amtEmerg, sym, 'var(--warning)')}
+        ${progressItem('Reserva de emergência',   emergDeposits, amtEmerg, sym, 'var(--warning)')}
         ${progressItem('Lazer / Desejos',         spentWants, amtWants, sym, 'var(--primary)')}
       </div>
       ${!hasActivity ? `<p class="progress-hint">Regista rendimentos, despesas e investimentos para ver o progresso.</p>` : ''}
@@ -1049,30 +1051,31 @@ function changeMonthExpenses(delta) {
 ══════════════════════════════════════ */
 async function renderEmergencyFund() {
   const sym = currencySymbol();
-
-  // Últimos 3 meses de despesas para calcular média
-  const now      = new Date();
-  const start3m  = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const now = new Date();
+  const todayStr  = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const start3m   = new Date(now.getFullYear(), now.getMonth() - 2, 1);
   const start3mStr = `${start3m.getFullYear()}-${String(start3m.getMonth() + 1).padStart(2, '0')}-01`;
 
-  const [fundRes, expRes] = await Promise.all([
+  const [fundRes, expRes, txRes] = await Promise.all([
     sb.from('emergency_fund').select('*').eq('user_id', currentUser.id).maybeSingle(),
-    sb.from('expenses').select('amount').eq('user_id', currentUser.id).gte('date', start3mStr)
+    sb.from('expenses').select('amount').eq('user_id', currentUser.id).gte('date', start3mStr),
+    sb.from('emergency_transactions').select('*').eq('user_id', currentUser.id).order('date', { ascending: false }).order('created_at', { ascending: false })
   ]);
 
   const fund    = fundRes.data;
   const current = Number(fund?.current_amount || 0);
   const target  = Number(fund?.target_amount  || 0);
   const pct     = target > 0 ? Math.min(100, Math.round(current / target * 100)) : 0;
+  const txs     = txRes.data || [];
 
   const totalExp3m = (expRes.data || []).reduce((s, e) => s + Number(e.amount), 0);
   const avgMonthly = totalExp3m / 3;
   const monthsProt = avgMonthly > 0 ? (current / avgMonthly).toFixed(1) : null;
 
-  const barColor    = pct >= 100 ? 'var(--success)' : pct >= 50 ? 'var(--warning)' : 'var(--info)';
-  const missing     = Math.max(0, target - current);
-  const recMin      = avgMonthly > 0 ? fmt(avgMonthly * 3) : null;
-  const recMax      = avgMonthly > 0 ? fmt(avgMonthly * 6) : null;
+  const barColor = pct >= 100 ? 'var(--success)' : pct >= 50 ? 'var(--warning)' : 'var(--info)';
+  const missing  = Math.max(0, target - current);
+  const recMin   = avgMonthly > 0 ? fmt(avgMonthly * 3) : null;
+  const recMax   = avgMonthly > 0 ? fmt(avgMonthly * 6) : null;
 
   render(appShell(`
     <div class="page-header">
@@ -1130,8 +1133,16 @@ async function renderEmergencyFund() {
             <input id="emerg-amount" type="number" min="0.01" step="0.01" placeholder="0.00" />
           </div>
         </div>
+        <div class="form-group">
+          <label>Data</label>
+          <input id="emerg-date" type="date" value="${todayStr}" />
+        </div>
+        <div class="form-group">
+          <label>Comentário <span class="label-opt">(opcional)</span></label>
+          <input id="emerg-desc" type="text" placeholder="ex: Poupança de Junho, Urgência médica…" />
+        </div>
       </div>
-      <button class="btn btn-primary" id="emerg-mov-btn" onclick="submitEmergencyMovement(${current})">Confirmar</button>
+      <button class="btn btn-primary" id="emerg-mov-btn" onclick="submitEmergencyMovement(${current})">Confirmar movimento</button>
     </div>
 
     <div class="card" style="margin-top:1rem;">
@@ -1147,12 +1158,43 @@ async function renderEmergencyFund() {
       ${recMin ? `<p class="emerg-rec">Recomendação: 3–6 meses de despesas &mdash; ${sym} ${recMin} a ${sym} ${recMax}</p>` : '<p class="emerg-rec">Recomendação: tipicamente 3 a 6 meses de despesas mensais.</p>'}
       <button class="btn btn-primary" id="emerg-target-btn" onclick="submitEmergencyTarget(${current})">Actualizar objectivo</button>
     </div>
+
+    <div class="card" style="margin-top:1rem;">
+      <div class="dash-section-title">Histórico de movimentos</div>
+      ${txs.length === 0
+        ? `<p class="progress-hint">Ainda não há movimentos registados.</p>`
+        : txs.map(t => emergTxRow(t, sym, current)).join('')
+      }
+    </div>
   `, 'emergency'));
+}
+
+function emergTxRow(t, sym, currentFund) {
+  const isDeposit = Number(t.amount) > 0;
+  const color     = isDeposit ? 'var(--success)' : 'var(--danger)';
+  const sign      = isDeposit ? '+' : '';
+  const icon      = isDeposit ? '💰' : '💸';
+  const label     = isDeposit ? 'Depósito' : 'Levantamento';
+  const date      = new Date(t.date + 'T00:00:00').toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return `
+    <div class="income-item">
+      <div class="income-item-left">
+        <span class="income-type-badge" style="background:${color}22;color:${color};border-color:${color}44">${icon} ${label}</span>
+        <span class="income-desc">${t.description || ''}</span>
+      </div>
+      <div class="income-item-right">
+        <span class="income-amount" style="color:${color}">${sign}${sym} ${fmt(Math.abs(Number(t.amount)))}</span>
+        <span class="income-date">${date}</span>
+        <button class="btn-delete" onclick="deleteEmergencyTx('${t.id}', ${Number(t.amount)}, ${currentFund})" title="Apagar">&#10005;</button>
+      </div>
+    </div>`;
 }
 
 async function submitEmergencyMovement(currentAmount) {
   const type    = document.getElementById('emerg-type').value;
   const amount  = parseFloat(document.getElementById('emerg-amount').value);
+  const date    = document.getElementById('emerg-date').value;
+  const desc    = document.getElementById('emerg-desc').value.trim();
   const btn     = document.getElementById('emerg-mov-btn');
   const alertEl = document.getElementById('emerg-alert');
   alertEl.className = 'alert alert-error';
@@ -1163,29 +1205,56 @@ async function submitEmergencyMovement(currentAmount) {
     return;
   }
 
-  btn.disabled = true;
+  btn.disabled    = true;
   btn.textContent = 'A guardar…';
 
-  const newCurrent = type === 'deposit'
+  const signedAmount = type === 'deposit' ? amount : -amount;
+  const newCurrent   = type === 'deposit'
     ? currentAmount + amount
     : Math.max(0, currentAmount - amount);
 
   const { data: fund } = await sb.from('emergency_fund').select('target_amount').eq('user_id', currentUser.id).maybeSingle();
 
-  const { error } = await sb.from('emergency_fund').upsert({
-    user_id:        currentUser.id,
-    current_amount: newCurrent,
-    target_amount:  Number(fund?.target_amount || 0),
-    updated_at:     new Date().toISOString()
-  }, { onConflict: 'user_id' });
+  const [fundRes, txRes] = await Promise.all([
+    sb.from('emergency_fund').upsert({
+      user_id:        currentUser.id,
+      current_amount: newCurrent,
+      target_amount:  Number(fund?.target_amount || 0),
+      updated_at:     new Date().toISOString()
+    }, { onConflict: 'user_id' }),
+    sb.from('emergency_transactions').insert({
+      user_id:     currentUser.id,
+      amount:      signedAmount,
+      description: desc || null,
+      date:        date || new Date().toISOString().split('T')[0]
+    })
+  ]);
 
+  const error = fundRes.error || txRes.error;
   if (error) {
     alertEl.textContent = 'Erro: ' + error.message;
     alertEl.classList.add('show');
     btn.disabled    = false;
-    btn.textContent = 'Confirmar';
+    btn.textContent = 'Confirmar movimento';
     return;
   }
+
+  await renderEmergencyFund();
+}
+
+async function deleteEmergencyTx(id, txAmount, currentFund) {
+  const newCurrent = currentFund - txAmount;
+  const { data: fund } = await sb.from('emergency_fund').select('target_amount').eq('user_id', currentUser.id).maybeSingle();
+
+  await Promise.all([
+    sb.from('emergency_fund').upsert({
+      user_id:        currentUser.id,
+      current_amount: Math.max(0, newCurrent),
+      target_amount:  Number(fund?.target_amount || 0),
+      updated_at:     new Date().toISOString()
+    }, { onConflict: 'user_id' }),
+    sb.from('emergency_transactions').delete().eq('id', id).eq('user_id', currentUser.id)
+  ]);
 
   await renderEmergencyFund();
 }
