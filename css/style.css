@@ -829,3 +829,20 @@ body {
 .inv-date-val { margin-left: auto; color: var(--text3); font-size: 0.75rem; }
 
 .inv-item-desc { font-size: 0.8rem; color: var(--text3); margin-top: 0.3rem; }
+
+/* ── Atalho iPhone / API token ── */
+.api-token-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.625rem 0.75rem;
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+}
+.api-token-ok {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--success);
+}

@@ -112,9 +112,22 @@ split_needs INTEGER       -- % para necessidades
 split_savings INTEGER     -- % para poupança/investimento
 split_emergency INTEGER   -- % para reserva de emergência
 split_wants INTEGER       -- % para lazer/desejos
+api_token TEXT UNIQUE     -- token para autenticação do iOS Shortcut (Apple Pay)
 updated_at TIMESTAMPTZ
 ```
 RLS activa — utilizador só vê/edita o seu próprio registo.
+`api_token`: UUID gerado no browser via `crypto.randomUUID()`, sem expiração. Usado pela Supabase Edge Function `add-expense` para autenticar pedidos do iOS Shortcuts sem exigir login Supabase.
+
+## Supabase Edge Functions
+
+### `add-expense`
+**URL:** `https://dwruxmnnewxawikvdhly.supabase.co/functions/v1/add-expense`
+**Método:** POST  
+**Body:** `{ token, amount, category, date, description }`
+
+Criada no Supabase Dashboard → Edge Functions. Valida o `api_token` contra `financial_profiles`, insere em `expenses` usando a service role key (não exposta ao frontend). Usada pelo iOS Shortcuts para registar despesas Apple Pay automaticamente.
+
+---
 
 ## Tema CSS (variáveis)
 

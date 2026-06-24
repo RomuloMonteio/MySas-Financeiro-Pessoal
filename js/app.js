@@ -284,6 +284,7 @@ async function renderProfileSetup() {
   const emergency = profile?.split_emergency ?? 15;
   const wants     = profile?.split_wants     ?? 10;
   const sym       = currencySymbol();
+  const hasToken  = !!profile?.api_token;
 
   render(appShell(`
     <div class="center-page" style="min-height:unset;padding:0;">
@@ -341,6 +342,35 @@ async function renderProfileSetup() {
         </div>
 
         <button class="btn btn-primary" id="profile-btn" onclick="submitProfile()">Guardar e continuar</button>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <div class="dash-section-title" style="display:flex;align-items:center;gap:0.5rem;">
+          <span>Atalho iPhone (Apple Pay)</span>
+        </div>
+        <p style="color:var(--text2);font-size:0.875rem;margin:0.25rem 0 1rem">
+          Gera um token pessoal para ligar o iOS Shortcuts ao MySas. Após configurares a Automatização no iPhone, cada pagamento Apple Pay da CGD adiciona a despesa automaticamente.
+        </p>
+        <div id="api-token-alert" class="alert alert-error"></div>
+        ${hasToken ? `
+        <div class="api-token-status">
+          <span class="api-token-ok">Token configurado</span>
+          <span style="color:var(--text2);font-size:0.8rem;">Clica em "Regenerar" para criar um novo token (invalida o anterior).</span>
+        </div>` : ''}
+        <div id="api-token-display" style="display:none;margin-bottom:1rem;">
+          <label style="font-size:0.75rem;color:var(--text2);display:block;margin-bottom:0.25rem;">O teu token de acesso — copia antes de sair desta página</label>
+          <div style="display:flex;gap:0.5rem;">
+            <input id="api-token-value" type="text" readonly
+              style="font-family:monospace;font-size:0.7rem;background:var(--bg3);flex:1;min-width:0;" />
+            <button class="btn btn-secondary" onclick="copyApiToken()" id="copy-token-btn" style="white-space:nowrap;flex-shrink:0;">Copiar</button>
+          </div>
+          <p style="font-size:0.75rem;color:var(--warning);margin:0.5rem 0 0;">
+            Guarda este token — se saíres da página sem copiar, terás de regenerar.
+          </p>
+        </div>
+        <button class="btn btn-secondary" id="gen-token-btn" onclick="generateApiToken()">
+          ${hasToken ? 'Regenerar token' : 'Gerar token de acesso'}
+        </button>
       </div>
     </div>`));
 }
@@ -409,6 +439,44 @@ async function submitProfile() {
   }
 
   navigate('dashboard');
+}
+
+async function generateApiToken() {
+  const btn     = document.getElementById('gen-token-btn');
+  const alertEl = document.getElementById('api-token-alert');
+  alertEl.className = 'alert alert-error';
+  btn.disabled    = true;
+  btn.textContent = 'A gerar…';
+
+  const token = crypto.randomUUID();
+
+  const { error } = await sb.from('financial_profiles').upsert({
+    user_id:    currentUser.id,
+    api_token:  token,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id' });
+
+  if (error) {
+    alertEl.textContent = 'Erro ao gerar token: ' + error.message;
+    alertEl.classList.add('show');
+    btn.disabled    = false;
+    btn.textContent = 'Gerar token de acesso';
+    return;
+  }
+
+  document.getElementById('api-token-value').value       = token;
+  document.getElementById('api-token-display').style.display = 'block';
+  btn.disabled    = false;
+  btn.textContent = 'Regenerar token';
+}
+
+function copyApiToken() {
+  const val = document.getElementById('api-token-value').value;
+  navigator.clipboard.writeText(val).then(() => {
+    const btn = document.getElementById('copy-token-btn');
+    btn.textContent = 'Copiado!';
+    setTimeout(() => { btn.textContent = 'Copiar'; }, 2000);
+  });
 }
 
 /* ══════════════════════════════════════
