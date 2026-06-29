@@ -723,6 +723,10 @@ async function renderIncome() {
   ]);
   incomeProfile = profileRes.data;
 
+  const now         = new Date();
+  const todayStr    = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const defaultDate = viewMonth === todayStr.slice(0, 7) ? todayStr : `${viewMonth}-01`;
+
   const needs   = Number(incomeProfile?.split_needs     ?? 50);
   const savings = Number(incomeProfile?.split_savings   ?? 25);
   const emerg   = Number(incomeProfile?.split_emergency ?? 15);
@@ -771,7 +775,7 @@ async function renderIncome() {
         </div>
         <div class="form-group">
           <label>Data</label>
-          <input id="inc-date" type="date" value="${viewMonth}-01" />
+          <input id="inc-date" type="date" value="${defaultDate}" />
         </div>
         <div class="form-group">
           <label>Descrição</label>
