@@ -11,6 +11,8 @@ let incomeProfile = null;
 
 let editingIncomeId       = null;
 let _incomeCache          = [];
+let editingExpenseId      = null;
+let _expenseCache         = [];
 let editingEmergencyTxId  = null;
 let _emergencyTxCache     = [];
 let _emergencyFundCurrent = 0;
@@ -1000,7 +1002,7 @@ async function renderExpenses() {
       <span class="month-total" style="color:var(--danger)">${sym} ${fmt(total)}</span>
     </div>
 
-    <div class="card income-form-card">
+    <div class="card income-form-card" id="exp-form-card">
       <div class="dash-section-title">Adicionar despesa</div>
       <div id="exp-alert" class="alert alert-error"></div>
       <div class="income-form-grid">
@@ -1026,7 +1028,10 @@ async function renderExpenses() {
           <input id="exp-desc" type="text" placeholder="Opcional" />
         </div>
       </div>
-      <button class="btn btn-primary income-submit-btn" id="exp-btn" onclick="submitExpense()">Adicionar despesa</button>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;margin-top:0.5rem;">
+        <button class="btn btn-primary income-submit-btn" id="exp-btn" onclick="submitExpense()">Adicionar despesa</button>
+        <button class="btn btn-secondary" id="exp-cancel" onclick="cancelEditExpense()" style="display:none;">Cancelar edição</button>
+      </div>
     </div>
 
     ${total > 0 ? expenseCategorySummary(byCategory, total, sym) : ''}
@@ -1077,7 +1082,8 @@ async function loadExpenseRows() {
     .gte('date', start)
     .lte('date', end)
     .order('date', { ascending: false });
-  return data || [];
+  _expenseCache = data || [];
+  return _expenseCache;
 }
 
 function expenseRow(r, sym) {
@@ -1092,6 +1098,7 @@ function expenseRow(r, sym) {
       <div class="income-item-right">
         <span class="income-amount" style="color:var(--danger)">${sym} ${fmt(r.amount)}</span>
         <span class="income-date">${date}</span>
+        <button class="btn-edit"   onclick="editExpense('${r.id}')"   title="Editar">&#9998;</button>
         <button class="btn-delete" onclick="deleteExpense('${r.id}')" title="Apagar">&#10005;</button>
       </div>
     </div>`;
@@ -1118,15 +1125,19 @@ async function submitExpense() {
   }
 
   btn.disabled    = true;
-  btn.textContent = 'A adicionar…';
+  btn.textContent = editingExpenseId ? 'A actualizar…' : 'A adicionar…';
 
-  const { error } = await sb.from('expenses').insert({
-    user_id:     currentUser.id,
-    category,
-    amount,
-    date,
-    description: desc || null
-  });
+  let error;
+  if (editingExpenseId) {
+    ({ error } = await sb.from('expenses').update({
+      category, amount, date, description: desc || null
+    }).eq('id', editingExpenseId).eq('user_id', currentUser.id));
+    editingExpenseId = null;
+  } else {
+    ({ error } = await sb.from('expenses').insert({
+      user_id: currentUser.id, category, amount, date, description: desc || null
+    }));
+  }
 
   if (error) {
     alertEl.textContent = 'Erro: ' + error.message;
@@ -1142,6 +1153,28 @@ async function submitExpense() {
 async function deleteExpense(id) {
   await sb.from('expenses').delete().eq('id', id).eq('user_id', currentUser.id);
   await renderExpenses();
+}
+
+function editExpense(id) {
+  const r = _expenseCache.find(x => x.id === id);
+  if (!r) return;
+  editingExpenseId = id;
+  document.getElementById('exp-cat').value    = r.category;
+  document.getElementById('exp-amount').value = r.amount;
+  document.getElementById('exp-date').value   = r.date;
+  document.getElementById('exp-desc').value   = r.description || '';
+  document.getElementById('exp-btn').textContent         = 'Actualizar despesa';
+  document.getElementById('exp-cancel').style.display    = 'inline-block';
+  document.getElementById('exp-form-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEditExpense() {
+  editingExpenseId = null;
+  document.getElementById('exp-btn').textContent      = 'Adicionar despesa';
+  document.getElementById('exp-cancel').style.display = 'none';
+  document.getElementById('exp-amount').value         = '';
+  document.getElementById('exp-desc').value           = '';
+  document.getElementById('exp-alert').className      = 'alert alert-error';
 }
 
 function changeMonthExpenses(delta) {
