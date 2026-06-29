@@ -539,7 +539,8 @@ async function renderDashboard() {
   const expTotal      = expenses.reduce((s, e) => s + Number(e.amount), 0);
   const invMonth      = (invMonthRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
   const emergDeposits = (emergTxRes.data || []).filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
-  const disponivel    = incomeTotal - expTotal - invMonth - emergDeposits;
+  const emergNetFlow  = (emergTxRes.data || []).reduce((s, t) => s + Number(t.amount), 0);
+  const disponivel    = incomeTotal - expTotal - invMonth - emergNetFlow;
   const dispColor     = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
   const dispSign      = disponivel < 0 ? '-' : '';
 
