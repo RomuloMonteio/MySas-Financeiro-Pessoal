@@ -520,12 +520,13 @@ async function renderDashboard() {
   const amtWants = salary * wants   / 100;
 
   // Cash flow do mês
-  const incomeTotal  = (incRes.data  || []).reduce((s, r) => s + Number(r.amount), 0);
-  const expTotal     = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const invMonth     = (invMonthRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
-  const disponivel   = incomeTotal - expTotal - invMonth - emergDeposits;
-  const dispColor    = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
-  const dispSign     = disponivel < 0 ? '-' : '';
+  const incomeTotal   = (incRes.data  || []).reduce((s, r) => s + Number(r.amount), 0);
+  const expTotal      = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const invMonth      = (invMonthRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
+  const emergDeposits = (emergTxRes.data || []).filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
+  const disponivel    = incomeTotal - expTotal - invMonth - emergDeposits;
+  const dispColor     = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
+  const dispSign      = disponivel < 0 ? '-' : '';
 
   // Património total
   const invTotal   = (invAllRes.data || []).reduce((s, i) => s + Number(i.current_value ?? i.amount), 0);
@@ -533,9 +534,8 @@ async function renderDashboard() {
   const patrimonio = invTotal + emergTotal + Math.max(0, disponivel);
 
   // Progresso por categoria
-  const spentNeeds   = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
-  const spentWants   = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
-  const emergDeposits = (emergTxRes.data || []).filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
+  const spentNeeds = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
+  const spentWants = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
   const hasActivity  = incomeTotal > 0 || expTotal > 0 || invMonth > 0;
 
   render(appShell(`
