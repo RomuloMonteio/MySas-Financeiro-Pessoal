@@ -11,8 +11,12 @@ let incomeProfile = null;
 
 let editingIncomeId       = null;
 let _incomeCache          = [];
+let incSortBy             = 'date-desc';
+let incFilterType         = 'all';
 let editingExpenseId      = null;
 let _expenseCache         = [];
+let expSortBy             = 'date-desc';
+let expFilterCat          = 'all';
 let editingEmergencyTxId  = null;
 let _emergencyTxCache     = [];
 let _emergencyFundCurrent = 0;
@@ -817,11 +821,28 @@ async function renderIncome() {
     </div>` : ''}
 
     <div class="card" style="margin-top:1rem;">
-      <div class="dash-section-title">Rendimentos de ${label}</div>
-      ${rows.length === 0
-        ? `<p class="progress-hint">Ainda não há rendimentos neste mês.</p>`
-        : rows.map(r => incomeRow(r, sym)).join('')
-      }
+      <div class="list-header">
+        <div class="dash-section-title" style="margin-bottom:0">Rendimentos de ${label}</div>
+        <select class="sort-select" onchange="setIncomeSort(this.value)">
+          <option value="date-desc"   ${incSortBy === 'date-desc'   ? 'selected' : ''}>↓ Data</option>
+          <option value="date-asc"    ${incSortBy === 'date-asc'    ? 'selected' : ''}>↑ Data</option>
+          <option value="amount-desc" ${incSortBy === 'amount-desc' ? 'selected' : ''}>↓ Valor</option>
+          <option value="amount-asc"  ${incSortBy === 'amount-asc'  ? 'selected' : ''}>↑ Valor</option>
+        </select>
+      </div>
+      ${rows.length > 0 ? `
+      <div class="filter-chips">
+        <button class="chip inc-chip${incFilterType === 'all' ? ' active' : ''}" data-type="all" onclick="setIncomeFilter('all')">Todos</button>
+        ${['Salário','Freelance','Arrendamento','Dividendos','Pensão','Outros'].map(t =>
+          `<button class="chip inc-chip${incFilterType === t ? ' active' : ''}" data-type="${t}" onclick="setIncomeFilter('${t}')">${t}</button>`
+        ).join('')}
+      </div>` : ''}
+      <div id="inc-list-body">
+        ${rows.length === 0
+          ? `<p class="progress-hint">Ainda não há rendimentos neste mês.</p>`
+          : applyIncomeFilters(rows, sym)
+        }
+      </div>
     </div>
   `, 'income'));
 }
@@ -950,6 +971,32 @@ function editIncome(id) {
   document.getElementById('inc-form-card').scrollIntoView({ behavior: 'smooth' });
 }
 
+function applyIncomeFilters(data, sym) {
+  let result = incFilterType === 'all' ? data : data.filter(r => r.type === incFilterType);
+  result = [...result].sort((a, b) => {
+    if (incSortBy === 'date-desc')   return b.date.localeCompare(a.date);
+    if (incSortBy === 'date-asc')    return a.date.localeCompare(b.date);
+    if (incSortBy === 'amount-desc') return Number(b.amount) - Number(a.amount);
+    if (incSortBy === 'amount-asc')  return Number(a.amount) - Number(b.amount);
+    return 0;
+  });
+  if (result.length === 0) return '<p class="progress-hint">Sem rendimentos com este filtro.</p>';
+  return result.map(r => incomeRow(r, sym)).join('');
+}
+
+function setIncomeSort(val) {
+  incSortBy = val;
+  const el = document.getElementById('inc-list-body');
+  if (el) el.innerHTML = applyIncomeFilters(_incomeCache, currencySymbol());
+}
+
+function setIncomeFilter(type) {
+  incFilterType = type;
+  document.querySelectorAll('.inc-chip').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+  const el = document.getElementById('inc-list-body');
+  if (el) el.innerHTML = applyIncomeFilters(_incomeCache, currencySymbol());
+}
+
 function cancelEditIncome() {
   editingIncomeId = null;
   document.getElementById('inc-btn').textContent          = 'Adicionar';
@@ -1037,11 +1084,28 @@ async function renderExpenses() {
     ${total > 0 ? expenseCategorySummary(byCategory, total, sym) : ''}
 
     <div class="card" style="margin-top:1rem;">
-      <div class="dash-section-title">Despesas de ${label}</div>
-      ${rows.length === 0
-        ? `<p class="progress-hint">Ainda não há despesas neste mês.</p>`
-        : rows.map(r => expenseRow(r, sym)).join('')
-      }
+      <div class="list-header">
+        <div class="dash-section-title" style="margin-bottom:0">Despesas de ${label}</div>
+        <select class="sort-select" onchange="setExpenseSort(this.value)">
+          <option value="date-desc"   ${expSortBy === 'date-desc'   ? 'selected' : ''}>↓ Data</option>
+          <option value="date-asc"    ${expSortBy === 'date-asc'    ? 'selected' : ''}>↑ Data</option>
+          <option value="amount-desc" ${expSortBy === 'amount-desc' ? 'selected' : ''}>↓ Valor</option>
+          <option value="amount-asc"  ${expSortBy === 'amount-asc'  ? 'selected' : ''}>↑ Valor</option>
+        </select>
+      </div>
+      ${rows.length > 0 ? `
+      <div class="filter-chips">
+        <button class="chip exp-chip${expFilterCat === 'all' ? ' active' : ''}" data-cat="all" onclick="setExpenseFilter('all')">Todos</button>
+        ${EXPENSE_CATS.map(c =>
+          `<button class="chip exp-chip${expFilterCat === c.name ? ' active' : ''}" data-cat="${c.name}" onclick="setExpenseFilter('${c.name}')">${c.icon} ${c.name}</button>`
+        ).join('')}
+      </div>` : ''}
+      <div id="exp-list-body">
+        ${rows.length === 0
+          ? `<p class="progress-hint">Ainda não há despesas neste mês.</p>`
+          : applyExpenseFilters(rows, sym)
+        }
+      </div>
     </div>
   `, 'expenses'));
 }
@@ -1166,6 +1230,32 @@ function editExpense(id) {
   document.getElementById('exp-btn').textContent         = 'Actualizar despesa';
   document.getElementById('exp-cancel').style.display    = 'inline-block';
   document.getElementById('exp-form-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+function applyExpenseFilters(data, sym) {
+  let result = expFilterCat === 'all' ? data : data.filter(r => r.category === expFilterCat);
+  result = [...result].sort((a, b) => {
+    if (expSortBy === 'date-desc')   return b.date.localeCompare(a.date);
+    if (expSortBy === 'date-asc')    return a.date.localeCompare(b.date);
+    if (expSortBy === 'amount-desc') return Number(b.amount) - Number(a.amount);
+    if (expSortBy === 'amount-asc')  return Number(a.amount) - Number(b.amount);
+    return 0;
+  });
+  if (result.length === 0) return '<p class="progress-hint">Sem despesas com este filtro.</p>';
+  return result.map(r => expenseRow(r, sym)).join('');
+}
+
+function setExpenseSort(val) {
+  expSortBy = val;
+  const el = document.getElementById('exp-list-body');
+  if (el) el.innerHTML = applyExpenseFilters(_expenseCache, currencySymbol());
+}
+
+function setExpenseFilter(cat) {
+  expFilterCat = cat;
+  document.querySelectorAll('.exp-chip').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+  const el = document.getElementById('exp-list-body');
+  if (el) el.innerHTML = applyExpenseFilters(_expenseCache, currencySymbol());
 }
 
 function cancelEditExpense() {
