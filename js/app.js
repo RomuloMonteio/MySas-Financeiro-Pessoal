@@ -5,9 +5,15 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
 /* ── Estado global ── */
-let currentUser  = null;
-let viewMonth    = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
-let incomeProfile = null; // cache do perfil para preview de repartição
+let currentUser   = null;
+let viewMonth     = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+let incomeProfile = null;
+
+let editingIncomeId       = null;
+let _incomeCache          = [];
+let editingEmergencyTxId  = null;
+let _emergencyTxCache     = [];
+let _emergencyFundCurrent = 0;
 
 /* ── Tipos de investimento ── */
 const INVESTMENT_TYPES = [
@@ -517,7 +523,7 @@ async function renderDashboard() {
   const incomeTotal  = (incRes.data  || []).reduce((s, r) => s + Number(r.amount), 0);
   const expTotal     = expenses.reduce((s, e) => s + Number(e.amount), 0);
   const invMonth     = (invMonthRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
-  const disponivel   = incomeTotal - expTotal - invMonth;
+  const disponivel   = incomeTotal - expTotal - invMonth - emergDeposits;
   const dispColor    = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
   const dispSign     = disponivel < 0 ? '-' : '';
 
@@ -735,7 +741,7 @@ async function renderIncome() {
       <span class="month-total">${sym} ${fmt(total)}</span>
     </div>
 
-    <div class="card income-form-card">
+    <div class="card income-form-card" id="inc-form-card">
       <div class="dash-section-title">Adicionar rendimento</div>
       <div id="income-alert" class="alert alert-error"></div>
       <div class="income-form-grid">
@@ -790,7 +796,10 @@ async function renderIncome() {
         </div>
       </div>
 
-      <button class="btn btn-primary income-submit-btn" id="inc-btn" onclick="submitIncome()">Adicionar</button>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;margin-top:0.5rem;">
+        <button class="btn btn-primary income-submit-btn" id="inc-btn" onclick="submitIncome()">Adicionar</button>
+        <button class="btn btn-secondary" id="inc-cancel" onclick="cancelEditIncome()" style="display:none;">Cancelar edição</button>
+      </div>
     </div>
 
     ${total > 0 ? `
@@ -854,7 +863,8 @@ async function loadIncomeRows() {
     .gte('date', start)
     .lte('date', end)
     .order('date', { ascending: false });
-  return data || [];
+  _incomeCache = data || [];
+  return _incomeCache;
 }
 
 function incomeRow(r, sym) {
@@ -868,6 +878,7 @@ function incomeRow(r, sym) {
       <div class="income-item-right">
         <span class="income-amount">${sym} ${fmt(r.amount)}</span>
         <span class="income-date">${date}</span>
+        <button class="btn-edit"   onclick="editIncome('${r.id}')"   title="Editar">&#9998;</button>
         <button class="btn-delete" onclick="deleteIncome('${r.id}')" title="Apagar">&#10005;</button>
       </div>
     </div>`;
@@ -893,21 +904,25 @@ async function submitIncome() {
     return;
   }
 
-  btn.disabled = true;
-  btn.textContent = 'A adicionar…';
+  btn.disabled    = true;
+  btn.textContent = editingIncomeId ? 'A actualizar…' : 'A adicionar…';
 
-  const { error } = await sb.from('income').insert({
-    user_id:     currentUser.id,
-    type,
-    amount,
-    date,
-    description: desc || null
-  });
+  let error;
+  if (editingIncomeId) {
+    ({ error } = await sb.from('income').update({
+      type, amount, date, description: desc || null
+    }).eq('id', editingIncomeId).eq('user_id', currentUser.id));
+    editingIncomeId = null;
+  } else {
+    ({ error } = await sb.from('income').insert({
+      user_id: currentUser.id, type, amount, date, description: desc || null
+    }));
+  }
 
   if (error) {
     alertEl.textContent = 'Erro: ' + error.message;
     alertEl.classList.add('show');
-    btn.disabled = false;
+    btn.disabled    = false;
     btn.textContent = 'Adicionar';
     return;
   }
@@ -918,6 +933,28 @@ async function submitIncome() {
 async function deleteIncome(id) {
   await sb.from('income').delete().eq('id', id).eq('user_id', currentUser.id);
   await renderIncome();
+}
+
+function editIncome(id) {
+  const r = _incomeCache.find(x => x.id === id);
+  if (!r) return;
+  editingIncomeId = id;
+  document.getElementById('inc-type').value   = r.type;
+  document.getElementById('inc-amount').value = r.amount;
+  document.getElementById('inc-date').value   = r.date;
+  document.getElementById('inc-desc').value   = r.description || '';
+  document.getElementById('inc-btn').textContent = 'Actualizar rendimento';
+  document.getElementById('inc-cancel').style.display = 'inline-block';
+  document.getElementById('inc-form-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEditIncome() {
+  editingIncomeId = null;
+  document.getElementById('inc-btn').textContent          = 'Adicionar';
+  document.getElementById('inc-cancel').style.display     = 'none';
+  document.getElementById('inc-amount').value             = '';
+  document.getElementById('inc-desc').value               = '';
+  document.getElementById('income-alert').className       = 'alert alert-error';
 }
 
 function changeMonth(delta) {
@@ -1136,6 +1173,9 @@ async function renderEmergencyFund() {
   const pct     = target > 0 ? Math.min(100, Math.round(current / target * 100)) : 0;
   const txs     = txRes.data || [];
 
+  _emergencyTxCache     = txs;
+  _emergencyFundCurrent = current;
+
   const totalExp3m = (expRes.data || []).reduce((s, e) => s + Number(e.amount), 0);
   const avgMonthly = totalExp3m / 3;
   const monthsProt = avgMonthly > 0 ? (current / avgMonthly).toFixed(1) : null;
@@ -1183,7 +1223,7 @@ async function renderEmergencyFund() {
       </div>
     </div>
 
-    <div class="card" style="margin-top:1rem;">
+    <div class="card" id="emerg-mov-card" style="margin-top:1rem;">
       <div class="dash-section-title">Registar movimento</div>
       <div id="emerg-alert" class="alert alert-error"></div>
       <div class="income-form-grid">
@@ -1210,7 +1250,10 @@ async function renderEmergencyFund() {
           <input id="emerg-desc" type="text" placeholder="ex: Poupança de Junho, Urgência médica…" />
         </div>
       </div>
-      <button class="btn btn-primary" id="emerg-mov-btn" onclick="submitEmergencyMovement(${current})">Confirmar movimento</button>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;margin-top:0.5rem;">
+        <button class="btn btn-primary" id="emerg-mov-btn" onclick="submitEmergencyMovement(${current})">Confirmar movimento</button>
+        <button class="btn btn-secondary" id="emerg-mov-cancel" onclick="cancelEditEmergencyTx()" style="display:none;">Cancelar edição</button>
+      </div>
     </div>
 
     <div class="card" style="margin-top:1rem;">
@@ -1253,6 +1296,7 @@ function emergTxRow(t, sym, currentFund) {
       <div class="income-item-right">
         <span class="income-amount" style="color:${color}">${sign}${sym} ${fmt(Math.abs(Number(t.amount)))}</span>
         <span class="income-date">${date}</span>
+        <button class="btn-edit"   onclick="editEmergencyTx('${t.id}')"                                        title="Editar">&#9998;</button>
         <button class="btn-delete" onclick="deleteEmergencyTx('${t.id}', ${Number(t.amount)}, ${currentFund})" title="Apagar">&#10005;</button>
       </div>
     </div>`;
@@ -1277,37 +1321,78 @@ async function submitEmergencyMovement(currentAmount) {
   btn.textContent = 'A guardar…';
 
   const signedAmount = type === 'deposit' ? amount : -amount;
-  const newCurrent   = type === 'deposit'
-    ? currentAmount + amount
-    : Math.max(0, currentAmount - amount);
-
   const { data: fund } = await sb.from('emergency_fund').select('target_amount').eq('user_id', currentUser.id).maybeSingle();
+  const targetAmount = Number(fund?.target_amount || 0);
 
-  const [fundRes, txRes] = await Promise.all([
-    sb.from('emergency_fund').upsert({
-      user_id:        currentUser.id,
-      current_amount: newCurrent,
-      target_amount:  Number(fund?.target_amount || 0),
-      updated_at:     new Date().toISOString()
-    }, { onConflict: 'user_id' }),
-    sb.from('emergency_transactions').insert({
-      user_id:     currentUser.id,
-      amount:      signedAmount,
-      description: desc || null,
-      date:        date || new Date().toISOString().split('T')[0]
-    })
-  ]);
+  let error;
 
-  const error = fundRes.error || txRes.error;
+  if (editingEmergencyTxId) {
+    const oldTx = _emergencyTxCache.find(x => x.id === editingEmergencyTxId);
+    const oldAmount = Number(oldTx?.amount || 0);
+    const newCurrent = Math.max(0, _emergencyFundCurrent - oldAmount + signedAmount);
+
+    const [fundRes, txRes] = await Promise.all([
+      sb.from('emergency_fund').upsert({
+        user_id: currentUser.id, current_amount: newCurrent,
+        target_amount: targetAmount, updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' }),
+      sb.from('emergency_transactions').update({
+        amount: signedAmount, description: desc || null,
+        date: date || new Date().toISOString().split('T')[0]
+      }).eq('id', editingEmergencyTxId).eq('user_id', currentUser.id)
+    ]);
+    error = fundRes.error || txRes.error;
+    editingEmergencyTxId = null;
+  } else {
+    const newCurrent = type === 'deposit'
+      ? currentAmount + amount
+      : Math.max(0, currentAmount - amount);
+
+    const [fundRes, txRes] = await Promise.all([
+      sb.from('emergency_fund').upsert({
+        user_id: currentUser.id, current_amount: newCurrent,
+        target_amount: targetAmount, updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' }),
+      sb.from('emergency_transactions').insert({
+        user_id: currentUser.id, amount: signedAmount,
+        description: desc || null,
+        date: date || new Date().toISOString().split('T')[0]
+      })
+    ]);
+    error = fundRes.error || txRes.error;
+  }
+
   if (error) {
     alertEl.textContent = 'Erro: ' + error.message;
     alertEl.classList.add('show');
     btn.disabled    = false;
-    btn.textContent = 'Confirmar movimento';
+    btn.textContent = editingEmergencyTxId ? 'Actualizar movimento' : 'Confirmar movimento';
     return;
   }
 
   await renderEmergencyFund();
+}
+
+function editEmergencyTx(id) {
+  const t = _emergencyTxCache.find(x => x.id === id);
+  if (!t) return;
+  editingEmergencyTxId = id;
+  document.getElementById('emerg-type').value   = Number(t.amount) > 0 ? 'deposit' : 'withdraw';
+  document.getElementById('emerg-amount').value = Math.abs(Number(t.amount));
+  document.getElementById('emerg-date').value   = t.date;
+  document.getElementById('emerg-desc').value   = t.description || '';
+  document.getElementById('emerg-mov-btn').textContent        = 'Actualizar movimento';
+  document.getElementById('emerg-mov-cancel').style.display  = 'inline-block';
+  document.getElementById('emerg-mov-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEditEmergencyTx() {
+  editingEmergencyTxId = null;
+  document.getElementById('emerg-mov-btn').textContent       = 'Confirmar movimento';
+  document.getElementById('emerg-mov-cancel').style.display  = 'none';
+  document.getElementById('emerg-amount').value              = '';
+  document.getElementById('emerg-desc').value                = '';
+  document.getElementById('emerg-alert').className           = 'alert alert-error';
 }
 
 async function deleteEmergencyTx(id, txAmount, currentFund) {

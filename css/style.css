@@ -834,6 +834,21 @@ body {
 
 .inv-item-desc { font-size: 0.8rem; color: var(--text3); margin-top: 0.3rem; }
 
+/* ── Botão editar (inline nas linhas) ── */
+.btn-edit {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.btn-edit:hover { background: color-mix(in srgb, var(--primary) 15%, transparent); }
+
 /* ── Atalho iPhone / API token ── */
 .api-token-status {
   display: flex;
