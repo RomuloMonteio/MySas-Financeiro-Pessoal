@@ -616,7 +616,7 @@ async function renderDashboard() {
       <div class="progress-list">
         ${progressItem('Necessidades',            spentNeeds, amtNeeds, sym, 'var(--info)')}
         ${progressItem('Poupança / Investimento', invMonth,   amtSav,   sym, 'var(--success)')}
-        ${progressItem('Reserva de emergência',   emergDeposits, amtEmerg, sym, 'var(--warning)')}
+        ${progressItem('Reserva de emergência',   Math.max(0, emergNetFlow), amtEmerg, sym, 'var(--warning)')}
         ${progressItem('Lazer / Desejos',         spentWants, amtWants, sym, 'var(--primary)')}
       </div>
       ${!hasActivity ? `<p class="progress-hint">Regista rendimentos, despesas e investimentos para ver o progresso.</p>` : ''}
@@ -1676,7 +1676,7 @@ function invSummaryCard(invested, current, absReturn, pctReturn, sym) {
     </div>`;
 }
 
-function invCompsubmitEmergencyTargetositionCard(byType, totalCurrent, sym) {
+function invCompositionCard(byType, totalCurrent, sym) {
   const items = INVESTMENT_TYPES
     .filter(t => byType[t.name])
     .map(t => {
