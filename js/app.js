@@ -21,6 +21,14 @@ let editingEmergencyTxId  = null;
 let _emergencyTxCache     = [];
 let _emergencyFundCurrent = 0;
 
+let _calendarData    = {};
+let _selectedCalDay  = null;
+let _alertsCount     = 0;
+let reportMode       = 'monthly';
+let _monthlyReportInc= [];
+let _monthlyReportExp= [];
+let _annualChartData = null;
+
 /* ── Tipos de investimento ── */
 const INVESTMENT_TYPES = [
   { name: 'Ações',        color: '#7c6aff', icon: '📈' },
@@ -75,6 +83,10 @@ function navigate(page) {
     case 'expenses':      renderExpenses();     break;
     case 'emergency':     renderEmergencyFund();  break;
     case 'investments':   renderInvestments();    break;
+    case 'more':          renderMore();           break;
+    case 'calendar':      renderCalendar();       break;
+    case 'reports':       renderReports();        break;
+    case 'alerts':        renderAlerts();         break;
     default:              renderLogin();
   }
 }
@@ -92,6 +104,9 @@ function appShell(content, activePage = '') {
     { page: 'expenses',    label: 'Despesas' },
     { page: 'emergency',   label: 'Emergência' },
     { page: 'investments', label: 'Investimentos' },
+    { page: 'calendar',    label: 'Calendário' },
+    { page: 'reports',     label: 'Relatórios' },
+    { page: 'alerts',      label: 'Alertas' },
   ];
   const navHtml = navItems.map(n =>
     `<button class="nav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">${n.label}</button>`
@@ -122,13 +137,21 @@ function appShell(content, activePage = '') {
       page: 'investments',
       label: 'Carteira',
       icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`
+    },
+    {
+      page: 'more',
+      label: 'Mais',
+      icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`
     }
   ];
-  const bnavHtml = bnavItems.map(n =>
-    `<button class="bnav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')">
-      ${n.icon}<span>${n.label}</span>
-    </button>`
-  ).join('');
+  const bnavHtml = bnavItems.map(n => {
+    const badge = (n.page === 'more' && _alertsCount > 0)
+      ? `<span class="alert-badge">${_alertsCount}</span>`
+      : '';
+    return `<button class="bnav-item${activePage === n.page ? ' active' : ''}" onclick="navigate('${n.page}')" style="${n.page === 'more' ? 'position:relative' : ''}">
+      ${n.icon}${badge}<span>${n.label}</span>
+    </button>`;
+  }).join('');
 
   return `
     <div class="app-shell">
@@ -1653,7 +1676,7 @@ function invSummaryCard(invested, current, absReturn, pctReturn, sym) {
     </div>`;
 }
 
-function invCompositionCard(byType, totalCurrent, sym) {
+function invCompsubmitEmergencyTargetositionCard(byType, totalCurrent, sym) {
   const items = INVESTMENT_TYPES
     .filter(t => byType[t.name])
     .map(t => {
@@ -1788,6 +1811,604 @@ async function submitEmergencyTarget(currentAmount) {
   }
 
   await renderEmergencyFund();
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: MAIS
+══════════════════════════════════════ */
+async function renderMore() {
+  const alerts = await computeAlerts();
+  _alertsCount = alerts.filter(a => a.severity === 'danger' || a.severity === 'warning').length;
+  const badge = _alertsCount > 0 ? `<span class="more-badge">${_alertsCount}</span>` : '';
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Mais</div>
+        <div class="page-subtitle">Calendário, relatórios e alertas</div>
+      </div>
+    </div>
+    <div class="more-grid">
+      <button class="more-card" onclick="navigate('calendar')">
+        <div class="more-card-icon">📅</div>
+        <div class="more-card-title">Calendário</div>
+        <div class="more-card-desc">Vista mensal de todas as transacções</div>
+      </button>
+      <button class="more-card" onclick="navigate('reports')">
+        <div class="more-card-icon">📊</div>
+        <div class="more-card-title">Relatórios</div>
+        <div class="more-card-desc">Análise mensal e anual dos dados financeiros</div>
+      </button>
+      <button class="more-card" onclick="navigate('alerts')" style="position:relative">
+        ${badge}
+        <div class="more-card-icon">🔔</div>
+        <div class="more-card-title">Alertas</div>
+        <div class="more-card-desc">Avisos e notificações financeiras</div>
+      </button>
+    </div>
+  `, 'more'));
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: CALENDÁRIO
+══════════════════════════════════════ */
+async function renderCalendar() {
+  const sym   = currencySymbol();
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const label = new Date(year, mon - 1, 1).toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+  const start = `${viewMonth}-01`;
+  const end   = `${viewMonth}-${String(new Date(year, mon, 0).getDate()).padStart(2, '0')}`;
+  const uid   = currentUser.id;
+
+  const [incRes, expRes, invRes, emgRes] = await Promise.all([
+    sb.from('income').select('*').eq('user_id', uid).gte('date', start).lte('date', end),
+    sb.from('expenses').select('*').eq('user_id', uid).gte('date', start).lte('date', end),
+    sb.from('investments').select('*').eq('user_id', uid).gte('date', start).lte('date', end),
+    sb.from('emergency_transactions').select('*').eq('user_id', uid).gte('date', start).lte('date', end),
+  ]);
+
+  _calendarData = buildCalendarData(
+    incRes.data || [], expRes.data || [], invRes.data || [], emgRes.data || []
+  );
+
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Calendário</div>
+        <div class="page-subtitle">Vista mensal das tuas transacções</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="month-nav">
+        <button class="btn-month" onclick="changeMonthCalendar(-1)">&#8249;</button>
+        <span class="month-label" style="text-transform:capitalize">${label}</span>
+        <button class="btn-month" onclick="changeMonthCalendar(1)">&#8250;</button>
+      </div>
+      <div id="cal-wrap">${renderCalendarGrid(year, mon)}</div>
+    </div>
+    <div id="cal-day-panel">${renderCalendarDayPanel(sym)}</div>
+  `, 'calendar'));
+}
+
+function buildCalendarData(income, expenses, investments, emergency) {
+  const data = {};
+  const add = (dateStr, type, item) => {
+    if (!data[dateStr]) data[dateStr] = { income: [], expenses: [], investments: [], emergency: [] };
+    data[dateStr][type].push(item);
+  };
+  income.forEach(r => add(r.date, 'income', r));
+  expenses.forEach(r => add(r.date, 'expenses', r));
+  investments.forEach(r => add(r.date, 'investments', r));
+  emergency.forEach(r => add(r.date, 'emergency', r));
+  return data;
+}
+
+function renderCalendarGrid(year, mon) {
+  const daysInMonth = new Date(year, mon, 0).getDate();
+  const firstDay    = new Date(year, mon - 1, 1).getDay();
+  const startOffset = (firstDay + 6) % 7; // segunda=0
+  const now         = new Date();
+  const todayStr    = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+  const headers = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']
+    .map(h => `<div class="cal-header-cell">${h}</div>`).join('');
+
+  let cells = '';
+  for (let i = 0; i < startOffset; i++) cells += `<div class="cal-day other-month"></div>`;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr  = `${year}-${String(mon).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayData  = _calendarData[dateStr] || {};
+    const isToday    = dateStr === todayStr;
+    const isSelected = dateStr === _selectedCalDay;
+
+    let dots = '';
+    if ((dayData.income      || []).length) dots += `<span class="cal-dot" style="background:var(--success)"></span>`;
+    if ((dayData.expenses    || []).length) dots += `<span class="cal-dot" style="background:var(--danger)"></span>`;
+    if ((dayData.investments || []).length) dots += `<span class="cal-dot" style="background:var(--primary)"></span>`;
+    if ((dayData.emergency   || []).length) dots += `<span class="cal-dot" style="background:var(--warning)"></span>`;
+
+    const cls = ['cal-day', isToday ? 'today' : '', isSelected ? 'selected' : ''].filter(Boolean).join(' ');
+    cells += `<div class="${cls}" onclick="selectCalendarDay('${dateStr}')">
+      <span class="cal-day-num">${d}</span>
+      <div class="cal-dots">${dots}</div>
+    </div>`;
+  }
+
+  const total = startOffset + daysInMonth;
+  const pad   = Math.ceil(total / 7) * 7 - total;
+  for (let i = 0; i < pad; i++) cells += `<div class="cal-day other-month"></div>`;
+
+  return `<div class="cal-grid">${headers}${cells}</div>`;
+}
+
+function renderCalendarDayPanel(sym) {
+  if (!_selectedCalDay) return `
+    <div class="card" style="text-align:center;color:var(--text2);padding:1.5rem;font-size:0.875rem">
+      Selecciona um dia para ver as transacções
+    </div>`;
+
+  const dayData  = _calendarData[_selectedCalDay] || {};
+  const dateLabel = new Date(_selectedCalDay + 'T00:00:00')
+    .toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  let sections = '';
+
+  if ((dayData.income || []).length) {
+    sections += `<div class="cal-section-title" style="color:var(--success)">Rendimentos</div>`;
+    dayData.income.forEach(r => {
+      sections += `<div class="cal-event-item">
+        <span class="cal-event-dot" style="background:var(--success)"></span>
+        <span class="cal-event-label">${r.type}${r.description ? ` · ${r.description}` : ''}</span>
+        <span class="cal-event-amount" style="color:var(--success)">+${sym} ${fmt(r.amount)}</span>
+      </div>`;
+    });
+  }
+  if ((dayData.expenses || []).length) {
+    sections += `<div class="cal-section-title" style="color:var(--danger)">Despesas</div>`;
+    dayData.expenses.forEach(r => {
+      sections += `<div class="cal-event-item">
+        <span class="cal-event-dot" style="background:var(--danger)"></span>
+        <span class="cal-event-label">${r.category}${r.description ? ` · ${r.description}` : ''}</span>
+        <span class="cal-event-amount" style="color:var(--danger)">-${sym} ${fmt(r.amount)}</span>
+      </div>`;
+    });
+  }
+  if ((dayData.investments || []).length) {
+    sections += `<div class="cal-section-title" style="color:var(--primary)">Investimentos</div>`;
+    dayData.investments.forEach(r => {
+      sections += `<div class="cal-event-item">
+        <span class="cal-event-dot" style="background:var(--primary)"></span>
+        <span class="cal-event-label">${r.name}${r.description ? ` · ${r.description}` : ''}</span>
+        <span class="cal-event-amount" style="color:var(--primary)">${sym} ${fmt(r.amount)}</span>
+      </div>`;
+    });
+  }
+  if ((dayData.emergency || []).length) {
+    sections += `<div class="cal-section-title" style="color:var(--warning)">Fundo de Emergência</div>`;
+    dayData.emergency.forEach(r => {
+      const amt   = Number(r.amount);
+      const sign  = amt >= 0 ? '+' : '-';
+      const lbl   = r.description || (amt >= 0 ? 'Depósito' : 'Levantamento');
+      sections += `<div class="cal-event-item">
+        <span class="cal-event-dot" style="background:var(--warning)"></span>
+        <span class="cal-event-label">${lbl}</span>
+        <span class="cal-event-amount" style="color:var(--warning)">${sign}${sym} ${fmt(Math.abs(amt))}</span>
+      </div>`;
+    });
+  }
+
+  if (!sections) sections = `<div style="text-align:center;color:var(--text2);padding:0.5rem 0;font-size:0.875rem">Sem transacções neste dia</div>`;
+
+  return `<div class="card cal-day-panel">
+    <div class="cal-panel-date">${dateLabel}</div>
+    ${sections}
+  </div>`;
+}
+
+function selectCalendarDay(dateStr) {
+  _selectedCalDay = _selectedCalDay === dateStr ? null : dateStr;
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const wrapEl  = document.getElementById('cal-wrap');
+  const panelEl = document.getElementById('cal-day-panel');
+  if (wrapEl)  wrapEl.innerHTML  = renderCalendarGrid(year, mon);
+  if (panelEl) panelEl.innerHTML = renderCalendarDayPanel(currencySymbol());
+}
+
+function changeMonthCalendar(delta) {
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const d = new Date(year, mon - 1 + delta, 1);
+  viewMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  _selectedCalDay = null;
+  renderCalendar();
+}
+
+/* ══════════════════════════════════════
+   PÁGINA: RELATÓRIOS
+══════════════════════════════════════ */
+async function renderReports() {
+  const sym   = currencySymbol();
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const label = new Date(year, mon - 1, 1).toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+
+  const tabsHtml = `
+    <div class="report-tabs">
+      <button class="report-tab${reportMode === 'monthly' ? ' active' : ''}" onclick="setReportMode('monthly')">Mensal</button>
+      <button class="report-tab${reportMode === 'annual'  ? ' active' : ''}" onclick="setReportMode('annual')">Anual (12 meses)</button>
+    </div>`;
+
+  const monthNavHtml = reportMode === 'monthly' ? `
+    <div class="month-nav" style="margin-bottom:1rem">
+      <button class="btn-month" onclick="changeMonthReports(-1)">&#8249;</button>
+      <span class="month-label" style="text-transform:capitalize">${label}</span>
+      <button class="btn-month" onclick="changeMonthReports(1)">&#8250;</button>
+      <button class="btn btn-ghost" onclick="exportCSV()" style="font-size:0.8rem;padding:0.4rem 0.75rem;margin-left:auto;height:auto">⬇ CSV</button>
+    </div>` : '';
+
+  let bodyHtml;
+  if (reportMode === 'monthly') {
+    bodyHtml = await buildMonthlyReport(sym, year, mon);
+  } else {
+    bodyHtml = await buildAnnualReport(sym);
+  }
+
+  render(appShell(`
+    <div class="page-header">
+      <div>
+        <div class="page-title">Relatórios</div>
+        <div class="page-subtitle">Análise financeira detalhada</div>
+      </div>
+    </div>
+    ${tabsHtml}
+    ${monthNavHtml}
+    ${bodyHtml}
+  `, 'reports'));
+
+  if (reportMode === 'annual' && _annualChartData) {
+    drawBarChart('annual-chart', _annualChartData.labels, _annualChartData.income, _annualChartData.expenses);
+  }
+}
+
+async function buildMonthlyReport(sym, year, mon) {
+  const start = `${viewMonth}-01`;
+  const end   = `${viewMonth}-${String(new Date(year, mon, 0).getDate()).padStart(2, '0')}`;
+  const uid   = currentUser.id;
+
+  const [profileRes, incRes, expRes, invRes, emergRes, emergTxRes] = await Promise.all([
+    sb.from('financial_profiles').select('*').eq('user_id', uid).maybeSingle(),
+    sb.from('income').select('*').eq('user_id', uid).gte('date', start).lte('date', end),
+    sb.from('expenses').select('*').eq('user_id', uid).gte('date', start).lte('date', end),
+    sb.from('investments').select('amount').eq('user_id', uid).gte('date', start).lte('date', end),
+    sb.from('emergency_fund').select('current_amount').eq('user_id', uid).maybeSingle(),
+    sb.from('emergency_transactions').select('amount').eq('user_id', uid).gte('date', start).lte('date', end),
+  ]);
+
+  const profile     = profileRes.data;
+  const income      = incRes.data  || [];
+  const expenses    = expRes.data  || [];
+  const salary      = Number(profile?.monthly_salary || 0);
+  const needsBudget = salary * Number(profile?.split_needs ?? 50) / 100;
+  const wantsBudget = salary * Number(profile?.split_wants ?? 10) / 100;
+
+  const incomeTotal  = income.reduce((s, r) => s + Number(r.amount), 0);
+  const expTotal     = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const invTotal     = (invRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
+  const emergTotal   = Number(emergRes.data?.current_amount || 0);
+  const emergNetFlow = (emergTxRes.data || []).reduce((s, t) => s + Number(t.amount), 0);
+  const disponivel   = incomeTotal - expTotal - invTotal - emergNetFlow;
+  const dispColor    = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
+
+  const spentNeeds = expenses.filter(e => getExpenseSplit(e.category) === 'needs').reduce((s, e) => s + Number(e.amount), 0);
+  const spentWants = expenses.filter(e => getExpenseSplit(e.category) === 'wants').reduce((s, e) => s + Number(e.amount), 0);
+
+  _monthlyReportInc = income;
+  _monthlyReportExp = expenses;
+
+  const incByType = {};
+  income.forEach(r => { incByType[r.type] = (incByType[r.type] || 0) + Number(r.amount); });
+  const incTypeHtml = Object.keys(incByType).length === 0
+    ? '<p class="progress-hint">Sem rendimentos neste mês</p>'
+    : Object.entries(incByType).map(([type, amt]) => `
+      <div class="split-sum-item">
+        <div class="split-sum-dot" style="background:var(--success)"></div>
+        <div class="split-sum-body">
+          <div class="split-sum-label">${type}</div>
+          <div class="split-sum-amount">${sym} ${fmt(amt)}</div>
+          <div class="split-sum-pct">${incomeTotal > 0 ? Math.round(amt / incomeTotal * 100) : 0}%</div>
+        </div>
+      </div>`).join('');
+
+  return `
+    <div class="overview-grid" style="margin-bottom:1rem">
+      <div class="report-stat-card"><div class="report-stat-label">Recebido</div><div class="report-stat-val" style="color:var(--success)">${sym} ${fmt(incomeTotal)}</div></div>
+      <div class="report-stat-card"><div class="report-stat-label">Gasto</div><div class="report-stat-val" style="color:var(--danger)">${sym} ${fmt(expTotal)}</div></div>
+      <div class="report-stat-card"><div class="report-stat-label">Investido</div><div class="report-stat-val" style="color:var(--primary)">${sym} ${fmt(invTotal)}</div></div>
+      <div class="report-stat-card"><div class="report-stat-label">Disponível</div><div class="report-stat-val" style="color:${dispColor}">${disponivel < 0 ? '-' : ''}${sym} ${fmt(Math.abs(disponivel))}</div></div>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="dash-section-title">Despesas vs Orçamento</div>
+      <div style="margin-top:0.75rem">
+        ${progressItem('Necessidades', spentNeeds, needsBudget, sym, 'var(--info)')}
+        ${progressItem('Lazer / Desejos', spentWants, wantsBudget, sym, 'var(--primary)')}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="dash-section-title">Rendimentos por tipo</div>
+      <div style="margin-top:0.75rem">${incTypeHtml}</div>
+    </div>
+    <div class="card">
+      <div class="dash-section-title">Fundo de Emergência</div>
+      <div style="color:var(--text2);font-size:0.875rem;margin-top:0.5rem">Saldo actual: <span style="color:var(--warning);font-weight:600">${sym} ${fmt(emergTotal)}</span></div>
+    </div>`;
+}
+
+async function buildAnnualReport(sym) {
+  const now     = new Date();
+  const d12ago  = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  const yearStart = `${d12ago.getFullYear()}-${String(d12ago.getMonth() + 1).padStart(2, '0')}-01`;
+  const yearEnd   = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+  const uid = currentUser.id;
+
+  const [incRes, expRes] = await Promise.all([
+    sb.from('income').select('amount, date').eq('user_id', uid).gte('date', yearStart).lte('date', yearEnd),
+    sb.from('expenses').select('amount, date').eq('user_id', uid).gte('date', yearStart).lte('date', yearEnd),
+  ]);
+
+  const incByMonth = {}, expByMonth = {};
+  (incRes.data || []).forEach(r => { const m = r.date.slice(0,7); incByMonth[m] = (incByMonth[m]||0) + Number(r.amount); });
+  (expRes.data || []).forEach(r => { const m = r.date.slice(0,7); expByMonth[m] = (expByMonth[m]||0) + Number(r.amount); });
+
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+
+  const labels       = months.map(m => new Date(m+'-01').toLocaleString('pt-PT', { month: 'short' }));
+  const incomeData   = months.map(m => incByMonth[m]  || 0);
+  const expensesData = months.map(m => expByMonth[m]  || 0);
+  _annualChartData   = { labels, income: incomeData, expenses: expensesData };
+
+  const totalInc  = incomeData.reduce((s, v) => s + v, 0);
+  const totalExp  = expensesData.reduce((s, v) => s + v, 0);
+  const totalDiff = totalInc - totalExp;
+  const diffClass = totalDiff >= 0 ? 'val-positive' : 'val-negative';
+
+  const tableRows = months.map((m, i) => {
+    const inc  = incomeData[i];
+    const exp  = expensesData[i];
+    const diff = inc - exp;
+    const ml   = new Date(m+'-01').toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
+    const dc   = diff >= 0 ? 'val-positive' : 'val-negative';
+    return `<tr>
+      <td style="text-transform:capitalize;white-space:nowrap">${ml}</td>
+      <td class="val-positive">${sym} ${fmt(inc)}</td>
+      <td style="color:var(--danger)">${sym} ${fmt(exp)}</td>
+      <td class="${dc}">${diff >= 0 ? '+' : '-'}${sym} ${fmt(Math.abs(diff))}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="dash-section-title">Últimos 12 meses — Rendimento vs Despesas</div>
+      <div class="chart-wrap" style="margin-top:0.75rem">
+        <canvas id="annual-chart"></canvas>
+      </div>
+      <div style="display:flex;gap:1.5rem;margin-top:0.75rem;font-size:0.8125rem;color:var(--text2)">
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--success);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Rendimento</span>
+        <span><span style="display:inline-block;width:12px;height:12px;background:var(--danger);border-radius:2px;margin-right:4px;vertical-align:middle"></span>Despesas</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="dash-section-title">Resumo por mês</div>
+      <div style="overflow-x:auto;margin-top:0.75rem">
+        <table class="report-table">
+          <thead><tr><th>Mês</th><th>Recebido</th><th>Gasto</th><th>Diferença</th></tr></thead>
+          <tbody>${tableRows}</tbody>
+          <tfoot>
+            <tr style="font-weight:700">
+              <td>Total</td>
+              <td class="val-positive">${sym} ${fmt(totalInc)}</td>
+              <td style="color:var(--danger)">${sym} ${fmt(totalExp)}</td>
+              <td class="${diffClass}">${totalDiff >= 0 ? '+' : '-'}${sym} ${fmt(Math.abs(totalDiff))}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>`;
+}
+
+function drawBarChart(canvasId, labels, incomeData, expensesData) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const dpr  = window.devicePixelRatio || 1;
+  const w    = Math.min(canvas.parentElement?.clientWidth || 320, 600);
+  const h    = 180;
+  canvas.width        = w * dpr;
+  canvas.height       = h * dpr;
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const maxVal = Math.max(...incomeData, ...expensesData, 1);
+  const n      = labels.length;
+  const padL   = 48, padR = 8, padT = 10, padB = 28;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+  const groupW = chartW / n;
+  const barW   = Math.max(groupW * 0.28, 4);
+  const barGap = 2;
+
+  [0, 0.5, 1].forEach(pct => {
+    const y   = padT + chartH - pct * chartH;
+    const val = maxVal * pct;
+    ctx.fillStyle   = '#7c7f99';
+    ctx.font        = `10px Inter, system-ui, sans-serif`;
+    ctx.textAlign   = 'right';
+    ctx.textBaseline= 'middle';
+    ctx.fillText(val >= 1000 ? `${(val/1000).toFixed(0)}k` : Math.round(val).toString(), padL - 4, y);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + chartW, y); ctx.stroke();
+  });
+
+  incomeData.forEach((inc, i) => {
+    const exp  = expensesData[i];
+    const gx   = padL + i * groupW + (groupW - barW * 2 - barGap) / 2;
+    const incH = (inc / maxVal) * chartH;
+    ctx.fillStyle = '#22c55e';
+    ctx.fillRect(gx, padT + chartH - incH, barW, incH);
+    const expH = (exp / maxVal) * chartH;
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(gx + barW + barGap, padT + chartH - expH, barW, expH);
+    ctx.fillStyle    = '#7c7f99';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(labels[i], gx + barW, padT + chartH + 4);
+  });
+}
+
+function exportCSV() {
+  const rows = [['Data', 'Tipo/Categoria', 'Valor', 'Descricao']];
+  (_monthlyReportInc || []).forEach(r => rows.push([r.date, r.type,     Number(r.amount).toFixed(2),          r.description || '']));
+  (_monthlyReportExp || []).forEach(r => rows.push([r.date, r.category, (-Number(r.amount)).toFixed(2), r.description || '']));
+  const csv  = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `mysas-${viewMonth}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function setReportMode(mode) {
+  reportMode = mode;
+  renderReports();
+}
+
+function changeMonthReports(delta) {
+  const [year, mon] = viewMonth.split('-').map(Number);
+  const d = new Date(year, mon - 1 + delta, 1);
+  viewMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  renderReports();
+}
+
+/* ══════════════════════════════════════
+   SISTEMA DE ALERTAS
+══════════════════════════════════════ */
+async function computeAlerts() {
+  const now       = new Date();
+  const dashMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const dashStart = `${dashMonth}-01`;
+  const dashEnd   = `${dashMonth}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+  const uid       = currentUser.id;
+
+  const [profileRes, expRes, incRes, invRes, emergRes, emergTxRes] = await Promise.all([
+    sb.from('financial_profiles').select('*').eq('user_id', uid).maybeSingle(),
+    sb.from('expenses').select('category, amount').eq('user_id', uid).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('income').select('amount').eq('user_id', uid).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('investments').select('amount').eq('user_id', uid).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('emergency_fund').select('current_amount, target_amount').eq('user_id', uid).maybeSingle(),
+    sb.from('emergency_transactions').select('amount').eq('user_id', uid).gte('date', dashStart).lte('date', dashEnd),
+  ]);
+
+  const profile      = profileRes.data;
+  const expenses     = expRes.data || [];
+  const salary       = Number(profile?.monthly_salary || 0);
+  const needsBudget  = salary * Number(profile?.split_needs ?? 50) / 100;
+  const wantsBudget  = salary * Number(profile?.split_wants ?? 10) / 100;
+  const incomeTotal  = (incRes.data || []).reduce((s, r) => s + Number(r.amount), 0);
+  const expTotal     = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const invMonth     = (invRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
+  const emergNetFlow = (emergTxRes.data || []).reduce((s, t) => s + Number(t.amount), 0);
+  const disponivel   = incomeTotal - expTotal - invMonth - emergNetFlow;
+  const spentNeeds   = expenses.filter(e => getExpenseSplit(e.category) === 'needs').reduce((s, e) => s + Number(e.amount), 0);
+  const spentWants   = expenses.filter(e => getExpenseSplit(e.category) === 'wants').reduce((s, e) => s + Number(e.amount), 0);
+  const emergCurrent = Number(emergRes.data?.current_amount || 0);
+  const emergTarget  = Number(emergRes.data?.target_amount  || 0);
+  const sym          = currencySymbol();
+
+  const alerts = [];
+
+  if (disponivel < 0) alerts.push({
+    severity: 'danger', page: 'dashboard',
+    title: 'Saldo negativo este mês',
+    desc:  `Estás a gastar ${sym} ${fmt(Math.abs(disponivel))} acima do que recebes este mês.`
+  });
+  if (emergCurrent === 0 && emergTarget > 0) alerts.push({
+    severity: 'danger', page: 'emergency',
+    title: 'Reserva de emergência vazia',
+    desc:  'O teu fundo de emergência está a zero. Começa a contribuir o quanto antes.'
+  });
+  if (spentNeeds > needsBudget && needsBudget > 0) alerts.push({
+    severity: 'warning', page: 'expenses',
+    title: 'Necessidades acima do orçamento',
+    desc:  `Gastaste ${sym} ${fmt(spentNeeds - needsBudget)} acima do limite de ${sym} ${fmt(needsBudget)}.`
+  });
+  if (spentWants > wantsBudget && wantsBudget > 0) alerts.push({
+    severity: 'warning', page: 'expenses',
+    title: 'Lazer acima do orçamento',
+    desc:  `Gastaste ${sym} ${fmt(spentWants - wantsBudget)} acima do limite de ${sym} ${fmt(wantsBudget)}.`
+  });
+  if (emergCurrent > 0 && emergTarget > 0 && emergCurrent < emergTarget * 0.5) alerts.push({
+    severity: 'warning', page: 'emergency',
+    title: 'Reserva abaixo de 50% do objectivo',
+    desc:  `O teu fundo está em ${Math.round(emergCurrent / emergTarget * 100)}% do objectivo de ${sym} ${fmt(emergTarget)}.`
+  });
+  if (spentNeeds > needsBudget * 0.8 && spentNeeds <= needsBudget && needsBudget > 0) alerts.push({
+    severity: 'info', page: 'expenses',
+    title: 'Necessidades a 80% do limite',
+    desc:  `Usaste ${Math.round(spentNeeds / needsBudget * 100)}% do orçamento de Necessidades.`
+  });
+  if (incomeTotal === 0) alerts.push({
+    severity: 'info', page: 'income',
+    title: 'Nenhum rendimento registado',
+    desc:  'Ainda não registaste rendimentos para o mês actual.'
+  });
+  if (emergCurrent >= emergTarget && emergTarget > 0) alerts.push({
+    severity: 'success', page: 'emergency',
+    title: 'Reserva de emergência completa!',
+    desc:  `Parabéns! O teu fundo atingiu o objectivo de ${sym} ${fmt(emergTarget)}.`
+  });
+
+  return alerts;
+}
+
+async function renderAlerts() {
+  const alerts = await computeAlerts();
+  _alertsCount = alerts.filter(a => a.severity === 'danger' || a.severity === 'warning').length;
+  const sevIcon = { danger: '🚨', warning: '⚠️', success: '✅', info: 'ℹ️' };
+
+  const countBadge = alerts.length > 0
+    ? `<span class="salary-badge" style="background:color-mix(in srgb, var(--warning) 15%, transparent);color:var(--warning)">${alerts.length} alertas</span>`
+    : '';
+
+  const alertsHtml = alerts.length === 0
+    ? `<div class="card" style="text-align:center;padding:2rem">
+        <div style="font-size:2.5rem;margin-bottom:0.5rem">✅</div>
+        <div style="font-weight:600;font-size:1rem;margin-bottom:0.25rem">Tudo em ordem!</div>
+        <div style="color:var(--text2);font-size:0.875rem">Não há alertas activos neste momento.</div>
+      </div>`
+    : alerts.map(a => `
+      <div class="alert-item ${a.severity}">
+        <div class="alert-sev-icon">${sevIcon[a.severity]}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;margin-bottom:0.25rem">${a.title}</div>
+          <div style="font-size:0.8125rem;color:var(--text2)">${a.desc}</div>
+        </div>
+        <button class="btn btn-ghost" onclick="navigate('${a.page}')" style="font-size:0.8rem;padding:0.4rem 0.75rem;flex-shrink:0;height:auto">Ver</button>
+      </div>`).join('');
+
+  render(appShell(`
+    <div class="page-header">
+      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <div class="page-title">Alertas</div>
+        ${countBadge}
+      </div>
+    </div>
+    ${alertsHtml}
+  `, 'alerts'));
 }
 
 /* ══════════════════════════════════════
