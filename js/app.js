@@ -34,14 +34,23 @@ const INVESTMENT_TYPES = [
 
 /* ── Categorias de despesa ── */
 const EXPENSE_CATS = [
-  { name: 'Casa',       color: '#3b82f6', icon: '🏠', split: 'needs' },
-  { name: 'Comida',     color: '#f59e0b', icon: '🍽️', split: 'needs' },
-  { name: 'Transporte', color: '#8b5cf6', icon: '🚗', split: 'needs' },
-  { name: 'Saúde',      color: '#22c55e', icon: '💊', split: 'needs' },
-  { name: 'Lazer',      color: '#ec4899', icon: '🎮', split: 'wants' },
-  { name: 'Tecnologia', color: '#06b6d4', icon: '💻', split: 'wants' },
-  { name: 'Outros',     color: '#6b7280', icon: '📦', split: 'wants' },
+  { name: 'Necessidades',    color: '#3b82f6', icon: '🏠', split: 'needs' },
+  { name: 'Lazer / Desejos', color: '#ec4899', icon: '🎮', split: 'wants' },
 ];
+
+/* Compatibilidade com categorias antigas + lookup visual */
+function getExpenseSplit(category) {
+  const cat = EXPENSE_CATS.find(c => c.name === category);
+  if (cat) return cat.split;
+  return ['Casa', 'Comida', 'Transporte', 'Saúde'].includes(category) ? 'needs' : 'wants';
+}
+
+function getExpenseCatMeta(category) {
+  const cat = EXPENSE_CATS.find(c => c.name === category);
+  if (cat) return cat;
+  const isNeeds = ['Casa', 'Comida', 'Transporte', 'Saúde'].includes(category);
+  return { color: isNeeds ? '#3b82f6' : '#ec4899', icon: isNeeds ? '🏠' : '🎮' };
+}
 
 /* ── Render helper ── */
 function render(html) {
@@ -540,8 +549,8 @@ async function renderDashboard() {
   const patrimonio = invTotal + emergTotal + Math.max(0, disponivel);
 
   // Progresso por categoria
-  const spentNeeds = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'needs').reduce((s, e) => s + Number(e.amount), 0);
-  const spentWants = expenses.filter(e => EXPENSE_CATS.find(c => c.name === e.category)?.split === 'wants').reduce((s, e) => s + Number(e.amount), 0);
+  const spentNeeds = expenses.filter(e => getExpenseSplit(e.category) === 'needs').reduce((s, e) => s + Number(e.amount), 0);
+  const spentWants = expenses.filter(e => getExpenseSplit(e.category) === 'wants').reduce((s, e) => s + Number(e.amount), 0);
   const hasActivity  = incomeTotal > 0 || expTotal > 0 || invMonth > 0;
 
   render(appShell(`
@@ -1155,7 +1164,7 @@ async function loadExpenseRows() {
 }
 
 function expenseRow(r, sym) {
-  const cat  = EXPENSE_CATS.find(c => c.name === r.category) || { color: '#6b7280', icon: '📦' };
+  const cat  = getExpenseCatMeta(r.category);
   const date = new Date(r.date + 'T00:00:00').toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' });
   return `
     <div class="income-item">
