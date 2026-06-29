@@ -925,7 +925,7 @@ body {
   gap: 0.75rem;
 }
 @media (min-width: 640px) {
-  .more-grid { grid-template-columns: repeat(3, 1fr); }
+  .more-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 }
 .more-card {
   background: var(--bg2);
@@ -1168,3 +1168,54 @@ body {
   flex-shrink: 0;
   line-height: 1.2;
 }
+
+/* ── Configurações ── */
+.settings-section {
+  background: var(--bg2);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow);
+}
+.settings-section .section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0 0 1rem 0;
+  color: var(--text1);
+}
+.history-item {
+  padding: 0.625rem 0;
+  border-bottom: 1px solid var(--bg3);
+}
+.history-item:last-child { border-bottom: none; }
+.history-date {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-bottom: 0.25rem;
+}
+.history-splits {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+  color: var(--text1);
+}
+
+/* ── IA Financeira ── */
+.insight-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.insight-card {
+  background: var(--bg2);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  border-left: 4px solid transparent;
+  box-shadow: var(--shadow);
+}
+.insight-card.positive { border-left-color: var(--success); }
+.insight-card.warning  { border-left-color: var(--warning); }
+.insight-card.info     { border-left-color: var(--info); }

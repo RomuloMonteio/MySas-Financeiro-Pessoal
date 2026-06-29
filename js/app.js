@@ -21,13 +21,15 @@ let editingEmergencyTxId  = null;
 let _emergencyTxCache     = [];
 let _emergencyFundCurrent = 0;
 
-let _calendarData    = {};
-let _selectedCalDay  = null;
-let _alertsCount     = 0;
-let reportMode       = 'monthly';
-let _monthlyReportInc= [];
-let _monthlyReportExp= [];
-let _annualChartData = null;
+let _calendarData       = {};
+let _selectedCalDay     = null;
+let _alertsCount        = 0;
+let reportMode          = 'monthly';
+let _monthlyReportInc   = [];
+let _monthlyReportExp   = [];
+let _annualChartData    = null;
+let _adjCache           = [];
+let _stratHistoryCache  = [];
 
 /* ── Tipos de investimento ── */
 const INVESTMENT_TYPES = [
@@ -87,6 +89,8 @@ function navigate(page) {
     case 'calendar':      renderCalendar();       break;
     case 'reports':       renderReports();        break;
     case 'alerts':        renderAlerts();         break;
+    case 'settings':      renderSettings();       break;
+    case 'ai-insights':   renderAIInsights();     break;
     default:              renderLogin();
   }
 }
@@ -533,14 +537,15 @@ async function renderDashboard() {
   const dashEnd   = `${dashMonth}-${String(new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
   const month     = now.toLocaleString('pt-PT', { month: 'long', year: 'numeric' });
 
-  const [profileRes, expRes, incRes, invMonthRes, invAllRes, emergRes, emergTxRes] = await Promise.all([
+  const [profileRes, expRes, incRes, invMonthRes, invAllRes, emergRes, emergTxRes, adjRes] = await Promise.all([
     sb.from('financial_profiles').select('*').eq('user_id', currentUser.id).maybeSingle(),
     sb.from('expenses').select('category, amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
     sb.from('income').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
     sb.from('investments').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
     sb.from('investments').select('current_value, amount').eq('user_id', currentUser.id),
     sb.from('emergency_fund').select('current_amount').eq('user_id', currentUser.id).maybeSingle(),
-    sb.from('emergency_transactions').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd)
+    sb.from('emergency_transactions').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd),
+    sb.from('account_adjustments').select('amount').eq('user_id', currentUser.id).gte('date', dashStart).lte('date', dashEnd)
   ]);
 
   const profile  = profileRes.data;
@@ -563,7 +568,8 @@ async function renderDashboard() {
   const invMonth      = (invMonthRes.data || []).reduce((s, i) => s + Number(i.amount), 0);
   const emergDeposits = (emergTxRes.data || []).filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
   const emergNetFlow  = (emergTxRes.data || []).reduce((s, t) => s + Number(t.amount), 0);
-  const disponivel    = incomeTotal - expTotal - invMonth - emergNetFlow;
+  const adjTotal      = (adjRes.data || []).reduce((s, r) => s + Number(r.amount), 0);
+  const disponivel    = incomeTotal - expTotal - invMonth - emergNetFlow + adjTotal;
   const dispColor     = disponivel >= 0 ? 'var(--success)' : 'var(--danger)';
   const dispSign      = disponivel < 0 ? '-' : '';
 
@@ -1824,7 +1830,7 @@ async function renderMore() {
     <div class="page-header">
       <div>
         <div class="page-title">Mais</div>
-        <div class="page-subtitle">Calendário, relatórios e alertas</div>
+        <div class="page-subtitle">Todas as funcionalidades avançadas</div>
       </div>
     </div>
     <div class="more-grid">
@@ -1843,6 +1849,16 @@ async function renderMore() {
         <div class="more-card-icon">🔔</div>
         <div class="more-card-title">Alertas</div>
         <div class="more-card-desc">Avisos e notificações financeiras</div>
+      </button>
+      <button class="more-card" onclick="navigate('ai-insights')">
+        <div class="more-card-icon">🤖</div>
+        <div class="more-card-title">IA Financeira</div>
+        <div class="more-card-desc">Análise de padrões e sugestões personalizadas</div>
+      </button>
+      <button class="more-card" onclick="navigate('settings')">
+        <div class="more-card-icon">⚙️</div>
+        <div class="more-card-title">Configurações</div>
+        <div class="more-card-desc">Estratégia, ajustes de conta e segurança</div>
       </button>
     </div>
   `, 'more'));
@@ -2409,6 +2425,474 @@ async function renderAlerts() {
     </div>
     ${alertsHtml}
   `, 'alerts'));
+}
+
+/* ══════════════════════════════════════
+   CONFIGURAÇÕES (FASE 14)
+══════════════════════════════════════ */
+async function renderSettings() {
+  render(appShell(`<div class="page-header"><div class="page-title">Configurações</div></div><div style="text-align:center;padding:3rem 1rem;color:var(--text2)">A carregar…</div>`, 'more'));
+
+  const sym = currencySymbol();
+  const [profileRes, histRes, adjRes] = await Promise.all([
+    sb.from('financial_profiles').select('*').eq('user_id', currentUser.id).maybeSingle(),
+    sb.from('strategy_history').select('*').eq('user_id', currentUser.id).order('changed_at', { ascending: false }).limit(10),
+    sb.from('account_adjustments').select('*').eq('user_id', currentUser.id).order('date', { ascending: false }).limit(5)
+  ]);
+
+  const p = profileRes.data || {};
+  const needs    = p.split_needs     ?? 50;
+  const savings  = p.split_savings   ?? 25;
+  const emergency = p.split_emergency ?? 15;
+  const wants    = p.split_wants     ?? 10;
+  _stratHistoryCache = histRes.data || [];
+  _adjCache = adjRes.data || [];
+
+  const histHtml = _stratHistoryCache.length === 0
+    ? `<p style="color:var(--text2);font-size:0.875rem">Ainda não há histórico. A primeira alteração à estratégia será registada aqui.</p>`
+    : _stratHistoryCache.map(h => {
+        const d = new Date(h.changed_at).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' });
+        return `<div class="history-item">
+          <div class="history-date">${d}</div>
+          <div class="history-splits">
+            <span>Nec: <b>${h.needs}%</b></span>
+            <span>Poup: <b>${h.savings}%</b></span>
+            <span>Emerg: <b>${h.emergency}%</b></span>
+            <span>Lazer: <b>${h.wants}%</b></span>
+          </div>
+        </div>`;
+      }).join('');
+
+  const adjListHtml = _adjCache.length === 0
+    ? `<p style="color:var(--text2);font-size:0.875rem">Sem ajustes recentes.</p>`
+    : _adjCache.map(a => {
+        const d = new Date(a.date + 'T12:00:00').toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' });
+        const cls = Number(a.amount) >= 0 ? 'val-positive' : 'val-negative';
+        const sign = Number(a.amount) >= 0 ? '+' : '';
+        return `<div class="history-item" style="display:flex;align-items:center;gap:0.75rem">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:0.875rem">${a.note || '—'}</div>
+            <div style="font-size:0.75rem;color:var(--text2)">${d}</div>
+          </div>
+          <div class="${cls}" style="font-weight:700;font-size:0.9rem">${sign}${fmt(Number(a.amount))} ${sym}</div>
+          <button class="btn btn-ghost" onclick="deleteAccountAdjustment('${a.id}')" style="font-size:0.75rem;padding:0.3rem 0.6rem;height:auto;color:var(--danger)">✕</button>
+        </div>`;
+      }).join('');
+
+  render(appShell(`
+    <div class="page-header"><div class="page-title">Configurações</div></div>
+
+    <!-- Secção 1: Estratégia -->
+    <div class="settings-section">
+      <h3 class="section-title">Estratégia de repartição</h3>
+      <p style="color:var(--text2);font-size:0.875rem;margin-bottom:1rem">As percentagens devem somar 100%.</p>
+      <div class="form-group">
+        <label class="form-label">Necessidades (%)</label>
+        <input type="number" id="set-needs" class="form-input" value="${needs}" min="0" max="100" oninput="updateSplitPreviewSettings()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Poupança / Investimento (%)</label>
+        <input type="number" id="set-savings" class="form-input" value="${savings}" min="0" max="100" oninput="updateSplitPreviewSettings()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Reserva de emergência (%)</label>
+        <input type="number" id="set-emergency" class="form-input" value="${emergency}" min="0" max="100" oninput="updateSplitPreviewSettings()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Lazer / Desejos (%)</label>
+        <input type="number" id="set-wants" class="form-input" value="${wants}" min="0" max="100" oninput="updateSplitPreviewSettings()">
+      </div>
+      <div id="split-preview-settings" style="margin:0.75rem 0 1rem;padding:0.75rem;background:var(--bg3);border-radius:8px;font-size:0.8125rem;color:var(--text2);text-align:center"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="submitSplitStrategy()">Guardar estratégia</button>
+      <div id="split-msg" style="margin-top:0.5rem;min-height:1.5rem;text-align:center;font-size:0.875rem"></div>
+    </div>
+
+    <!-- Secção 2: Histórico -->
+    <div class="settings-section">
+      <h3 class="section-title">Histórico de estratégia</h3>
+      ${histHtml}
+    </div>
+
+    <!-- Secção 3: Ajuste de conta -->
+    <div class="settings-section">
+      <h3 class="section-title">Ajuste de conta</h3>
+      <p style="color:var(--text2);font-size:0.875rem;margin-bottom:1rem">Corrige o disponível quando há discrepâncias (compra esquecida, troco errado, etc.).</p>
+      <div class="form-group">
+        <label class="form-label">Valor (${sym}) — negativo para subtrair</label>
+        <input type="number" id="adj-amount" class="form-input" placeholder="Ex: -25.50" step="0.01">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Data</label>
+        <input type="date" id="adj-date" class="form-input" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nota (obrigatória)</label>
+        <input type="text" id="adj-note" class="form-input" placeholder="Ex: Esqueci de registar almoço">
+      </div>
+      <button class="btn btn-primary" style="width:100%" onclick="submitAccountAdjustment()">Registar ajuste</button>
+      <div id="adj-msg" style="margin-top:0.5rem;min-height:1.5rem;text-align:center;font-size:0.875rem"></div>
+      <div style="margin-top:1rem">${adjListHtml}</div>
+    </div>
+
+    <!-- Secção 4: Segurança -->
+    <div class="settings-section">
+      <h3 class="section-title">Segurança e dados</h3>
+      <p style="color:var(--text2);font-size:0.875rem;margin-bottom:1rem">Os teus dados são protegidos por encriptação em trânsito (TLS), cifra at-rest no PostgreSQL e isolamento por Row Level Security.</p>
+      <button class="btn btn-secondary" style="width:100%;margin-bottom:0.75rem" onclick="exportAllData()">⬇ Exportar todos os dados (JSON)</button>
+      <button class="btn" style="width:100%;background:var(--danger);color:#fff" onclick="deleteAccount()">🗑 Apagar conta e todos os dados</button>
+    </div>
+  `, 'more'));
+
+  updateSplitPreviewSettings();
+}
+
+function updateSplitPreviewSettings() {
+  const n = parseInt(document.getElementById('set-needs')?.value) || 0;
+  const s = parseInt(document.getElementById('set-savings')?.value) || 0;
+  const e = parseInt(document.getElementById('set-emergency')?.value) || 0;
+  const w = parseInt(document.getElementById('set-wants')?.value) || 0;
+  const total = n + s + e + w;
+  const el = document.getElementById('split-preview-settings');
+  if (!el) return;
+  const color = total === 100 ? 'var(--success)' : 'var(--danger)';
+  el.innerHTML = `Total: <b style="color:${color}">${total}%</b> ${total === 100 ? '✓' : `— faltam ${100 - total}%`}`;
+}
+
+async function submitSplitStrategy() {
+  const n = parseInt(document.getElementById('set-needs')?.value) || 0;
+  const s = parseInt(document.getElementById('set-savings')?.value) || 0;
+  const e = parseInt(document.getElementById('set-emergency')?.value) || 0;
+  const w = parseInt(document.getElementById('set-wants')?.value) || 0;
+  const msg = document.getElementById('split-msg');
+
+  if (n + s + e + w !== 100) {
+    msg.textContent = 'As percentagens têm de somar 100%.';
+    msg.style.color = 'var(--danger)';
+    return;
+  }
+
+  const { data: current } = await sb.from('financial_profiles').select('split_needs, split_savings, split_emergency, split_wants').eq('user_id', currentUser.id).maybeSingle();
+
+  if (current) {
+    await sb.from('strategy_history').insert({
+      user_id:   currentUser.id,
+      needs:     current.split_needs    ?? 50,
+      savings:   current.split_savings  ?? 25,
+      emergency: current.split_emergency ?? 15,
+      wants:     current.split_wants    ?? 10
+    });
+  }
+
+  const { error } = await sb.from('financial_profiles').upsert({
+    user_id:          currentUser.id,
+    split_needs:      n,
+    split_savings:    s,
+    split_emergency:  e,
+    split_wants:      w,
+    updated_at:       new Date().toISOString()
+  }, { onConflict: 'user_id' });
+
+  if (error) {
+    msg.textContent = traduzirErro(error.message);
+    msg.style.color = 'var(--danger)';
+  } else {
+    msg.textContent = '✓ Estratégia guardada com sucesso.';
+    msg.style.color = 'var(--success)';
+    setTimeout(() => renderSettings(), 1200);
+  }
+}
+
+async function submitAccountAdjustment() {
+  const amount = parseFloat(document.getElementById('adj-amount')?.value);
+  const date   = document.getElementById('adj-date')?.value;
+  const note   = document.getElementById('adj-note')?.value.trim();
+  const msg    = document.getElementById('adj-msg');
+
+  if (!amount || isNaN(amount)) { msg.textContent = 'Valor inválido.'; msg.style.color = 'var(--danger)'; return; }
+  if (!date)  { msg.textContent = 'Selecciona uma data.'; msg.style.color = 'var(--danger)'; return; }
+  if (!note)  { msg.textContent = 'A nota é obrigatória.'; msg.style.color = 'var(--danger)'; return; }
+
+  const { error } = await sb.from('account_adjustments').insert({
+    user_id: currentUser.id,
+    amount,
+    note,
+    date
+  });
+
+  if (error) {
+    msg.textContent = traduzirErro(error.message);
+    msg.style.color = 'var(--danger)';
+  } else {
+    msg.textContent = '✓ Ajuste registado.';
+    msg.style.color = 'var(--success)';
+    setTimeout(() => renderSettings(), 1000);
+  }
+}
+
+async function deleteAccountAdjustment(id) {
+  const { error } = await sb.from('account_adjustments').delete().eq('id', id).eq('user_id', currentUser.id);
+  if (!error) renderSettings();
+}
+
+async function exportAllData() {
+  const uid = currentUser.id;
+  const [incRes, expRes, invRes, efRes, etRes, fpRes, shRes, aaRes] = await Promise.all([
+    sb.from('income').select('*').eq('user_id', uid),
+    sb.from('expenses').select('*').eq('user_id', uid),
+    sb.from('investments').select('*').eq('user_id', uid),
+    sb.from('emergency_fund').select('*').eq('user_id', uid).maybeSingle(),
+    sb.from('emergency_transactions').select('*').eq('user_id', uid),
+    sb.from('financial_profiles').select('*').eq('user_id', uid).maybeSingle(),
+    sb.from('strategy_history').select('*').eq('user_id', uid),
+    sb.from('account_adjustments').select('*').eq('user_id', uid)
+  ]);
+
+  const payload = {
+    exportDate:    new Date().toISOString(),
+    user_email:    currentUser.email,
+    income:        incRes.data  || [],
+    expenses:      expRes.data  || [],
+    investments:   invRes.data  || [],
+    emergency_fund: efRes.data  || null,
+    emergency_transactions: etRes.data || [],
+    financial_profile: fpRes.data || null,
+    strategy_history:  shRes.data || [],
+    account_adjustments: aaRes.data || []
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `mysas-export-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function deleteAccount() {
+  const confirmation = prompt('Esta acção é irreversível. Escreve DELETE para confirmar.');
+  if (confirmation !== 'DELETE') return;
+
+  const uid = currentUser.id;
+  await Promise.all([
+    sb.from('income').delete().eq('user_id', uid),
+    sb.from('expenses').delete().eq('user_id', uid),
+    sb.from('investments').delete().eq('user_id', uid),
+    sb.from('emergency_fund').delete().eq('user_id', uid),
+    sb.from('emergency_transactions').delete().eq('user_id', uid),
+    sb.from('financial_profiles').delete().eq('user_id', uid),
+    sb.from('strategy_history').delete().eq('user_id', uid),
+    sb.from('account_adjustments').delete().eq('user_id', uid)
+  ]);
+
+  await sb.auth.signOut();
+  currentUser = null;
+  navigate('login');
+}
+
+/* ══════════════════════════════════════
+   IA FINANCEIRA
+══════════════════════════════════════ */
+async function computeAIInsights() {
+  const uid = currentUser.id;
+  const today = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    months.push(d.toISOString().slice(0, 7));
+  }
+
+  const [profileRes, efRes] = await Promise.all([
+    sb.from('financial_profiles').select('*').eq('user_id', uid).maybeSingle(),
+    sb.from('emergency_fund').select('*').eq('user_id', uid).maybeSingle()
+  ]);
+
+  const prof = profileRes.data || {};
+  const ef   = efRes.data || { current_amount: 0, target_amount: 0 };
+  const needsPct    = prof.split_needs     ?? 50;
+  const savingsPct  = prof.split_savings   ?? 25;
+  const emergPct    = prof.split_emergency ?? 15;
+  const wantsPct    = prof.split_wants     ?? 10;
+  const salary      = prof.monthly_salary  ?? 0;
+
+  const monthData = await Promise.all(months.map(async (ym) => {
+    const [s, e] = monthBounds(ym);
+    const [incR, expR, invR, etR] = await Promise.all([
+      sb.from('income').select('amount, type').eq('user_id', uid).gte('date', s).lte('date', e),
+      sb.from('expenses').select('amount, category').eq('user_id', uid).gte('date', s).lte('date', e),
+      sb.from('investments').select('amount').eq('user_id', uid).gte('date', s).lte('date', e),
+      sb.from('emergency_transactions').select('amount').eq('user_id', uid).gte('date', s).lte('date', e)
+    ]);
+    const inc     = (incR.data || []).reduce((s, r) => s + Number(r.amount), 0);
+    const exp     = (expR.data || []).reduce((s, r) => s + Number(r.amount), 0);
+    const inv     = (invR.data || []).reduce((s, r) => s + Number(r.amount), 0);
+    const emgNet  = (etR.data || []).reduce((s, r) => s + Number(r.amount), 0);
+    const disp    = inc - exp - inv - emgNet;
+    const incTypes = [...new Set((incR.data || []).map(r => r.type))];
+    const catMap  = {};
+    (expR.data || []).forEach(r => { catMap[r.category] = (catMap[r.category] || 0) + Number(r.amount); });
+    return { ym, inc, exp, inv, emgNet, disp, incTypes, catMap };
+  }));
+
+  const activeMonths = monthData.filter(m => m.inc > 0 || m.exp > 0);
+  if (activeMonths.length === 0) return null;
+
+  const insights = [];
+  const sym = currencySymbol();
+
+  // 1 — Taxa de poupança média
+  const avgInc  = activeMonths.reduce((s, m) => s + m.inc, 0) / activeMonths.length;
+  const avgSaved = activeMonths.reduce((s, m) => s + Math.max(0, m.inv + m.emgNet), 0) / activeMonths.length;
+  if (avgInc > 0) {
+    const rate = (avgSaved / avgInc) * 100;
+    const targetRate = savingsPct + emergPct;
+    if (rate >= targetRate) {
+      insights.push({ severity: 'positive', icon: '📈', title: 'Boa taxa de poupança', body: `Nos últimos ${activeMonths.length} meses poupaste em média ${rate.toFixed(1)}% do rendimento. O teu objectivo é ${targetRate}% — parabéns!` });
+    } else {
+      insights.push({ severity: 'warning', icon: '📉', title: 'Taxa de poupança abaixo do objectivo', body: `A tua taxa de poupança média é ${rate.toFixed(1)}% mas o objectivo é ${targetRate}%. Considera reduzir despesas variáveis para aumentar a poupança em ${fmt(avgInc * (targetRate - rate) / 100)} ${sym}/mês.` });
+    }
+  }
+
+  // 2 — Meses negativos
+  const negMonths = activeMonths.filter(m => m.disp < 0);
+  if (negMonths.length >= 2) {
+    insights.push({ severity: 'warning', icon: '⚠️', title: `${negMonths.length} meses com saldo negativo`, body: `Em ${negMonths.length} dos últimos ${activeMonths.length} meses gastaste mais do que recebeste. Revê as categorias de despesas para identificar padrões de excesso.` });
+  } else if (negMonths.length === 0 && activeMonths.length >= 3) {
+    insights.push({ severity: 'positive', icon: '✅', title: 'Saldo positivo consistente', body: `Todos os ${activeMonths.length} meses analisados terminaram com saldo positivo. Excelente controlo financeiro!` });
+  }
+
+  // 3 — Categoria com mais excesso
+  if (salary > 0) {
+    const wantsBudget = salary * wantsPct / 100;
+    const catTotals = {};
+    activeMonths.forEach(m => {
+      Object.entries(m.catMap).forEach(([cat, amt]) => {
+        const split = getExpenseSplit(cat);
+        if (split === 'wants') catTotals[cat] = (catTotals[cat] || 0) + amt;
+      });
+    });
+    const wantsAvg = Object.values(catTotals).reduce((s, v) => s + v, 0) / activeMonths.length;
+    if (wantsAvg > wantsBudget) {
+      const top = Object.entries(catTotals).sort((a, b) => b[1] - a[1])[0];
+      insights.push({ severity: 'warning', icon: '🎯', title: 'Lazer acima do orçamento', body: `Os teus gastos em lazer/desejos excedem o orçamento em média ${fmt(wantsAvg - wantsBudget)} ${sym}/mês. A categoria que mais contribui é "${top ? top[0] : 'Outros'}".` });
+    }
+  }
+
+  // 4 — Trajectória da reserva de emergência
+  if (ef.target_amount > 0 && ef.current_amount < ef.target_amount) {
+    const avgEmg = activeMonths.reduce((s, m) => s + Math.max(0, m.emgNet), 0) / activeMonths.length;
+    if (avgEmg > 0) {
+      const remaining = ef.target_amount - ef.current_amount;
+      const months_needed = Math.ceil(remaining / avgEmg);
+      insights.push({ severity: 'info', icon: '🛡️', title: 'Reserva de emergência em progresso', body: `Ao ritmo actual (${fmt(avgEmg)} ${sym}/mês) atingirás o objectivo em aproximadamente ${months_needed} ${months_needed === 1 ? 'mês' : 'meses'}. Faltam ${fmt(remaining)} ${sym}.` });
+    } else {
+      insights.push({ severity: 'warning', icon: '🛡️', title: 'Reserva de emergência parada', body: `Não registaste depósitos na reserva de emergência nos últimos meses. O objectivo está ${Math.round((ef.current_amount / ef.target_amount) * 100)}% concluído.` });
+    }
+  }
+
+  // 5 — Melhor e pior mês
+  if (activeMonths.length >= 3) {
+    const sorted = [...activeMonths].sort((a, b) => b.disp - a.disp);
+    const best  = sorted[0];
+    const worst = sorted[sorted.length - 1];
+    const bestLabel  = new Date(best.ym  + '-15').toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' });
+    const worstLabel = new Date(worst.ym + '-15').toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' });
+    insights.push({ severity: 'info', icon: '📅', title: 'Padrão mensal', body: `O teu melhor mês foi ${bestLabel} (disponível: ${fmt(best.disp)} ${sym}) e o mais difícil foi ${worstLabel} (disponível: ${fmt(worst.disp)} ${sym}).` });
+  }
+
+  // 6 — Diversificação de rendimento
+  const allTypes = new Set(activeMonths.flatMap(m => m.incTypes));
+  if (allTypes.size === 1) {
+    insights.push({ severity: 'info', icon: '💡', title: 'Fonte de rendimento única', body: `Tens apenas uma fonte de rendimento. Diversificar (freelance, investimentos, rendas) aumenta a resiliência financeira.` });
+  } else if (allTypes.size >= 3) {
+    insights.push({ severity: 'positive', icon: '💼', title: 'Bom nível de diversificação', body: `Tens ${allTypes.size} fontes de rendimento diferentes — isso reduz a vulnerabilidade a perdas de emprego ou imprevistos.` });
+  }
+
+  // 7 — Sugestão de poupança concreta
+  if (salary > 0 && ef.target_amount > ef.current_amount) {
+    const wantsBudget = salary * wantsPct / 100;
+    const avgWants = activeMonths.reduce((s, m) => {
+      const w = Object.entries(m.catMap).filter(([c]) => getExpenseSplit(c) === 'wants').reduce((a, [, v]) => a + v, 0);
+      return s + w;
+    }, 0) / activeMonths.length;
+    if (avgWants > wantsBudget * 1.1) {
+      const saving = avgWants - wantsBudget;
+      const remaining = ef.target_amount - ef.current_amount;
+      const months_faster = Math.round(remaining / saving);
+      insights.push({ severity: 'info', icon: '💰', title: 'Sugestão de poupança', body: `Se reduzires o lazer em ${fmt(saving)} ${sym}/mês (até ao orçamento de ${fmt(wantsBudget)} ${sym}), poupas ${fmt(saving * 12)} ${sym}/ano e atinges a reserva de emergência ~${months_faster} ${months_faster === 1 ? 'mês' : 'meses'} mais cedo.` });
+    }
+  }
+
+  return { insights, activeMonths: activeMonths.length, avgInc };
+}
+
+async function renderAIInsights() {
+  render(appShell(`<div class="page-header"><div class="page-title">IA Financeira</div></div><div style="text-align:center;padding:3rem 1rem;color:var(--text2)">A analisar os teus dados…</div>`, 'more'));
+
+  const result = await computeAIInsights();
+  const sym    = currencySymbol();
+
+  if (!result || result.insights.length === 0) {
+    render(appShell(`
+      <div class="page-header"><div class="page-title">IA Financeira</div></div>
+      <div class="card" style="text-align:center;padding:2.5rem 1rem">
+        <div style="font-size:2.5rem;margin-bottom:0.75rem">🤖</div>
+        <div style="font-weight:600;font-size:1rem;margin-bottom:0.5rem">Ainda sem dados suficientes</div>
+        <div style="color:var(--text2);font-size:0.875rem">Regista pelo menos 1 mês de rendimentos e despesas para obteres análise personalizada.</div>
+      </div>
+    `, 'more'));
+    return;
+  }
+
+  const { insights, activeMonths, avgInc } = result;
+  const positives = insights.filter(i => i.severity === 'positive').length;
+  const warnings  = insights.filter(i => i.severity === 'warning').length;
+  const ordered   = [...insights.filter(i => i.severity === 'warning'), ...insights.filter(i => i.severity !== 'warning')];
+  const now       = new Date().toLocaleDateString('pt-PT', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const summaryCards = `
+    <div class="insight-summary-grid">
+      <div class="card" style="text-align:center;padding:1rem">
+        <div style="font-size:1.5rem;margin-bottom:0.25rem">📊</div>
+        <div style="font-size:1.25rem;font-weight:700">${activeMonths}</div>
+        <div style="font-size:0.75rem;color:var(--text2)">Meses analisados</div>
+      </div>
+      <div class="card" style="text-align:center;padding:1rem">
+        <div style="font-size:1.5rem;margin-bottom:0.25rem">✅</div>
+        <div style="font-size:1.25rem;font-weight:700;color:var(--success)">${positives}</div>
+        <div style="font-size:0.75rem;color:var(--text2)">Pontos positivos</div>
+      </div>
+      <div class="card" style="text-align:center;padding:1rem">
+        <div style="font-size:1.5rem;margin-bottom:0.25rem">⚠️</div>
+        <div style="font-size:1.25rem;font-weight:700;color:var(--warning)">${warnings}</div>
+        <div style="font-size:0.75rem;color:var(--text2)">Alertas</div>
+      </div>
+    </div>`;
+
+  const insightCards = ordered.map(ins => `
+    <div class="insight-card ${ins.severity}">
+      <div style="display:flex;align-items:flex-start;gap:0.75rem">
+        <div style="font-size:1.5rem;flex-shrink:0;line-height:1">${ins.icon}</div>
+        <div>
+          <div style="font-weight:600;margin-bottom:0.375rem">${ins.title}</div>
+          <div style="font-size:0.875rem;color:var(--text2);line-height:1.5">${ins.body}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  render(appShell(`
+    <div class="page-header">
+      <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <div class="page-title">IA Financeira</div>
+      </div>
+      <div style="font-size:0.75rem;color:var(--text2);margin-top:0.25rem">Análise em ${now}</div>
+    </div>
+    ${summaryCards}
+    <div style="margin-top:0.25rem">${insightCards}</div>
+    <div style="text-align:center;margin-top:1rem;padding-bottom:1rem">
+      <button class="btn btn-secondary" onclick="renderAIInsights()">↺ Actualizar análise</button>
+    </div>
+  `, 'more'));
 }
 
 /* ══════════════════════════════════════
